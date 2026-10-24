@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Service Inventory — NetScan{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 style="font-size:1.4rem;">Service Inventory</h1>
+        <p style="color:var(--text-dim); font-size:0.85rem;">
+            {{ services|length }} unique service{{ 's' if services|length != 1 }} across all scans
+        </p>
+    </div>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-sm">&larr; Dashboard</a>
+</div>
+
+{% if services %}
+<div class="card">
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Service</th>
+                    <th>Port</th>
+                    <th>Banner / Version</th>
+                    <th>Hosts</th>
+                    <th>IPs</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in services %}
+                <tr onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'table-row' : 'none'" style="cursor:pointer;">
+                    <td><strong>{{ s.service or 'unknown' }}</strong></td>
+                    <td><span class="badge" style="background:var(--accent-light); color:#000; padding:2px 8px; border-radius:4px;">{{ s.port }}</span></td>
+                    <td class="mono text-dim" style="font-size:0.8rem;">{{ s.banner or '—' }}</td>
+                    <td>
+                        <span style="font-weight:600;">{{ s.host_count }}</span>
+                        <span class="text-dim"> host{{ 's' if s.host_count != 1 }}</span>
+                    </td>
+                    <td>
+                        {% set ip_list = s.ips.split(',') if s.ips else [] %}
+                        {% if ip_list|length > 2 %}
+                        <span class="badge" style="background:var(--orange, #ff8800); color:#000; padding:2px 8px; border-radius:4px; cursor:help;" title="{{ s.ips }}">
+                            {{ ip_list|length }} IPs
+                        </span>
+                        {% else %}
+                        {% for ip in ip_list %}
+                        <a href="{{ url_for('ip_profile', ip_address=ip|trim) }}" style="color:var(--accent-light); font-size:0.8rem;">{{ ip|trim }}</a>{{ ', ' if not loop.last }}
+                        {% endfor %}
+                        {% endif %}
+                    </td>
+                </tr>
+                <tr style="display:none;">
+                    <td colspan="5" style="padding:0.5rem 1rem; background:var(--bg, #0f1117);">
+                        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                            {% for ip in (s.ips or '').split(',') %}
+                            {% if ip|trim %}
+                            <a href="{{ url_for('ip_profile', ip_address=ip|trim) }}"
+                               class="btn btn-sm btn-secondary" style="font-size:0.75rem; padding:3px 8px;">
+                                {{ ip|trim }}
+                            </a>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <p>No services discovered yet. Run a scan first.</p>
+        <a href="{{ url_for('new_scan') }}" class="btn btn-primary mt-2">+ New Scan</a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

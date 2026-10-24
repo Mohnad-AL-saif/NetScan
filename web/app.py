@@ -1139,6 +1139,25 @@ def ip_profile(ip_address):
                            history=scan_history)
 
 
+# --- Service Inventory ---
+
+@app.route('/inventory')
+@login_required
+def inventory():
+    conn = models.get_db()
+    services = conn.execute('''
+        SELECT sr.service, sr.port, sr.banner,
+               COUNT(DISTINCT sr.ip) as host_count,
+               GROUP_CONCAT(DISTINCT sr.ip) as ips
+        FROM scan_results sr JOIN scans s ON sr.scan_id = s.id
+        WHERE s.user_id = ?
+        GROUP BY sr.service, sr.port
+        ORDER BY host_count DESC
+    ''', (session['user_id'],)).fetchall()
+    conn.close()
+    return render_template('inventory.html', services=services)
+
+
 # --- Compare ---
 
 @app.route('/compare')
