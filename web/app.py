@@ -621,6 +621,52 @@ def export_raw_scan(scan_id):
     )
 
 
+def get_ssh_nmap_data(scripts_text):
+    """Extract SSH data from nmap scripts output stored in scan_results.scripts."""
+    if not scripts_text:
+        return None
+
+    data = {
+        'auth_methods': [],
+        'kex_algorithms': [],
+        'ciphers': [],
+        'macs': [],
+        'host_key_types': [],
+        'raw': scripts_text,
+    }
+
+    auth_match = re.findall(r'(?:authentication_methods|auth_methods)[:\s]+([^\n]+)', scripts_text, re.IGNORECASE)
+    if auth_match:
+        for m in auth_match:
+            data['auth_methods'].extend([x.strip() for x in m.split(',')])
+
+    if 'password' in scripts_text.lower() and ('auth' in scripts_text.lower() or 'authentication' in scripts_text.lower()):
+        if 'password' not in data['auth_methods']:
+            data['auth_methods'].append('password')
+
+    kex_match = re.findall(r'kex_algorithms[:\s]+([^\n]+)', scripts_text, re.IGNORECASE)
+    if kex_match:
+        for m in kex_match:
+            data['kex_algorithms'].extend([x.strip() for x in m.split(',')])
+
+    cipher_match = re.findall(r'encryption_algorithms[:\s]+([^\n]+)', scripts_text, re.IGNORECASE)
+    if cipher_match:
+        for m in cipher_match:
+            data['ciphers'].extend([x.strip() for x in m.split(',')])
+
+    mac_match = re.findall(r'mac_algorithms[:\s]+([^\n]+)', scripts_text, re.IGNORECASE)
+    if mac_match:
+        for m in mac_match:
+            data['macs'].extend([x.strip() for x in m.split(',')])
+
+    hk_match = re.findall(r'server_host_key_algorithms[:\s]+([^\n]+)', scripts_text, re.IGNORECASE)
+    if hk_match:
+        for m in hk_match:
+            data['host_key_types'].extend([x.strip() for x in m.split(',')])
+
+    return data
+
+
 @app.route('/scan/<int:scan_id>/run-findings', methods=['POST'])
 @login_required
 def run_findings(scan_id):
@@ -875,6 +921,95 @@ def run_findings(scan_id):
                 detail = f'Weak protocols ({", ".join(weak)}) on {ip}:{port}'
                 if detail not in grouped[fname]['details']:
                     grouped[fname]['details'].append(detail)
+
+    for r in results:
+        ip = r['ip']
+        port = r['port']
+        scripts_text = r.get('scripts', '') or ''
+        if not scripts_text or port != 22:
+            continue
+
+        ssh_data = get_ssh_nmap_data(scripts_text)
+        if not ssh_data:
+            continue
+
+        if 'password' in ssh_data['auth_methods']:
+            fname = 'SSH Password Authentication Enabled'
+            if fname not in grouped:
+                grouped[fname] = {'finding_name': fname, 'severity': 'Medium', 'cvss': 5.3,
+                                  'category': 'ssh_config', 'ips': set(), 'ports': set(), 'details': []}
+            grouped[fname]['ips'].add(ip)
+            grouped[fname]['ports'].add(port)
+            detail = f'Auth methods: {", ".join(ssh_data["auth_methods"])} on {ip}:{port}'
+            if detail not in grouped[fname]['details']:
+                grouped[fname]['details'].append(detail)
+
+        if 'keyboard-interactive' in ssh_data['auth_methods']:
+            fname = 'SSH Keyboard-Interactive Auth Enabled'
+            if fname not in grouped:
+                grouped[fname] = {'finding_name': fname, 'severity': 'Low', 'cvss': 3.7,
+                                  'category': 'ssh_config', 'ips': set(), 'ports': set(), 'details': []}
+            grouped[fname]['ips'].add(ip)
+            grouped[fname]['ports'].add(port)
+
+        cbc_ciphers = [c for c in ssh_data['ciphers'] if 'cbc' in c.lower()]
+        if cbc_ciphers:
+            fname = 'SSH CBC Mode Ciphers Enabled'
+            sev = 'High' if any('3des' in c for c in cbc_ciphers) else 'Medium'
+            cvss = 7.5 if sev == 'High' else 5.3
+            if fname not in grouped:
+                grouped[fname] = {'finding_name': fname, 'severity': sev, 'cvss': cvss,
+                                  'category': 'ssh_config', 'ips': set(), 'ports': set(), 'details': []}
+            grouped[fname]['ips'].add(ip)
+            grouped[fname]['ports'].add(port)
+            detail = f'CBC ciphers: {", ".join(cbc_ciphers)} on {ip}:{port}'
+            if detail not in grouped[fname]['details']:
+                grouped[fname]['details'].append(detail)
+
+        weak_kex = {
+            'diffie-hellman-group1-sha1': ('Medium', 5.3),
+            'diffie-hellman-group-exchange-sha1': ('Medium', 5.3),
+            'diffie-hellman-group14-sha1': ('Low', 3.7),
+        }
+        for kex in ssh_data['kex_algorithms']:
+            kex_clean = kex.strip()
+            if kex_clean in weak_kex:
+                sev, cvss = weak_kex[kex_clean]
+                fname = f'SSH Weak Key Exchange ({kex_clean})'
+                if fname not in grouped:
+                    grouped[fname] = {'finding_name': fname, 'severity': sev, 'cvss': cvss,
+                                      'category': 'ssh_config', 'ips': set(), 'ports': set(), 'details': []}
+                grouped[fname]['ips'].add(ip)
+                grouped[fname]['ports'].add(port)
+
+        weak_macs = {
+            'hmac-md5': ('Medium', 5.3),
+            'hmac-md5-96': ('Medium', 5.3),
+            'hmac-sha1': ('Low', 3.7),
+            'hmac-sha1-96': ('Medium', 5.3),
+            'umac-64': ('Low', 3.7),
+            'umac-64@openssh.com': ('Low', 3.7),
+        }
+        for mac in ssh_data['macs']:
+            mac_clean = mac.strip().lower()
+            for weak_name, (sev, cvss) in weak_macs.items():
+                if weak_name in mac_clean:
+                    fname = f'SSH Weak MAC ({mac.strip()})'
+                    if fname not in grouped:
+                        grouped[fname] = {'finding_name': fname, 'severity': sev, 'cvss': cvss,
+                                          'category': 'ssh_config', 'ips': set(), 'ports': set(), 'details': []}
+                    grouped[fname]['ips'].add(ip)
+                    grouped[fname]['ports'].add(port)
+                    break
+
+        arcfour_ciphers = [c for c in ssh_data['ciphers'] if 'arcfour' in c.lower()]
+        if arcfour_ciphers:
+            fname = 'SSH Weak Encryption (arcfour)'
+            if fname not in grouped:
+                grouped[fname] = {'finding_name': fname, 'severity': 'Medium', 'cvss': 5.3,
+                                  'category': 'ssh_config', 'ips': set(), 'ports': set(), 'details': []}
+            grouped[fname]['ips'].add(ip)
+            grouped[fname]['ports'].add(port)
 
     count = 0
     c = models.get_db()
