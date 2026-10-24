@@ -135,12 +135,39 @@ def index():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    stats = models.get_dashboard_stats(session['user_id'])
+    conn = models.get_db()
+    stats = {
+        'total_scans': conn.execute('SELECT COUNT(*) FROM scans WHERE user_id=?', (session['user_id'],)).fetchone()[0],
+        'total_ips': conn.execute('SELECT COUNT(DISTINCT ip) FROM scan_results sr JOIN scans s ON sr.scan_id=s.id WHERE s.user_id=?', (session['user_id'],)).fetchone()[0],
+        'total_services': conn.execute('SELECT COUNT(*) FROM scan_results sr JOIN scans s ON sr.scan_id=s.id WHERE s.user_id=?', (session['user_id'],)).fetchone()[0],
+        'vuln_findings': conn.execute('SELECT COUNT(*) FROM finding_results fr JOIN scans s ON fr.scan_id=s.id WHERE s.user_id=? AND fr.vulnerable=1', (session['user_id'],)).fetchone()[0],
+        'critical': conn.execute('SELECT COUNT(*) FROM finding_results fr JOIN scans s ON fr.scan_id=s.id WHERE s.user_id=? AND fr.vulnerable=1 AND fr.severity="Critical"', (session['user_id'],)).fetchone()[0],
+    }
+
+    top_ports = conn.execute('''
+        SELECT sr.port, sr.service, COUNT(DISTINCT sr.ip) as host_count
+        FROM scan_results sr JOIN scans s ON sr.scan_id=s.id
+        WHERE s.user_id=?
+        GROUP BY sr.port ORDER BY host_count DESC LIMIT 10
+    ''', (session['user_id'],)).fetchall()
+
+    critical_findings = conn.execute('''
+        SELECT finding_name, severity, ip, port
+        FROM finding_results fr JOIN scans s ON fr.scan_id=s.id
+        WHERE s.user_id=? AND fr.vulnerable=1
+        ORDER BY CASE fr.severity WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END, fr.finding_name
+        LIMIT 15
+    ''', (session['user_id'],)).fetchall()
+
     recent_scans = models.get_user_scans(session['user_id'], limit=5)
     scan_findings = {}
     for scan in recent_scans:
         scan_findings[scan['id']] = models.get_finding_stats(scan['id'])
-    return render_template('dashboard.html', stats=stats, recent_scans=recent_scans, scan_findings=scan_findings)
+
+    conn.close()
+    return render_template('dashboard.html', stats=stats, recent_scans=recent_scans,
+                           scan_findings=scan_findings, top_ports=top_ports,
+                           critical_findings=critical_findings)
 
 
 @app.route('/scan/new', methods=['GET', 'POST'])

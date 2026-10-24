@@ -9,19 +9,71 @@
 <div class="stats-grid">
     <div class="stat-card">
         <div class="stat-label">Total Scans</div>
-        <div class="stat-value">{{ stats.scan_count }}</div>
+        <div class="stat-value">{{ stats.total_scans }}</div>
     </div>
     <div class="stat-card">
-        <div class="stat-label">Total Findings</div>
-        <div class="stat-value">{{ stats.total_findings }}</div>
+        <div class="stat-label">Unique IPs</div>
+        <div class="stat-value">{{ stats.total_ips }}</div>
     </div>
     <div class="stat-card">
-        <div class="stat-label">Critical Findings</div>
-        <div class="stat-value text-red">{{ stats.critical_findings }}</div>
+        <div class="stat-label">Open Services</div>
+        <div class="stat-value">{{ stats.total_services }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Findings</div>
+        <div class="stat-value" style="color:var(--orange, #ff8800);">{{ stats.vuln_findings }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Critical</div>
+        <div class="stat-value text-red">{{ stats.critical }}</div>
     </div>
 </div>
 
-<div class="card">
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem;">
+    {% if top_ports %}
+    <div class="card">
+        <div class="card-header" style="margin-bottom:0.75rem;">Top 10 Exposed Ports</div>
+        {% set max_count = top_ports[0]['host_count'] if top_ports else 1 %}
+        {% for p in top_ports %}
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+            <code style="min-width:55px; text-align:right; font-size:0.85rem; color:var(--text-dim);">{{ p.port }}</code>
+            <div style="flex:1; background:var(--bg-dim, #1a1d27); border-radius:4px; overflow:hidden; height:22px;">
+                <div style="width:{{ (p.host_count / max_count * 100)|int }}%; background:var(--accent, #6c5ce7); height:100%; border-radius:4px; min-width:2px;"></div>
+            </div>
+            <span style="font-size:0.8rem; color:var(--text-dim); min-width:70px;">{{ p.service or '—' }}</span>
+            <span style="font-size:0.8rem; font-weight:600; min-width:50px;">{{ p.host_count }} host{{ 's' if p.host_count != 1 }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if critical_findings %}
+    <div class="card">
+        <div class="card-header" style="margin-bottom:0.75rem;">Findings Overview</div>
+        {% for f in critical_findings %}
+        <div style="display:flex; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--bg-dim, #1a1d27);">
+            {% if f.severity == 'Critical' %}
+            <span style="background:#ff4444; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:55px; text-align:center;">CRIT</span>
+            {% elif f.severity == 'High' %}
+            <span style="background:#ff8800; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:55px; text-align:center;">HIGH</span>
+            {% elif f.severity == 'Medium' %}
+            <span style="background:#2196f3; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:55px; text-align:center;">MED</span>
+            {% else %}
+            <span style="background:#555; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:55px; text-align:center;">{{ f.severity[:4]|upper }}</span>
+            {% endif %}
+            <span style="flex:1; font-size:0.85rem;">{{ f.finding_name }}</span>
+            <code style="font-size:0.75rem; color:var(--text-dim);">
+                {% set ip_list = f.ip.split(', ') %}
+                {% if ip_list|length > 1 %}{{ ip_list|length }} IPs{% else %}{{ f.ip }}{% endif %}
+                :{{ f.port }}
+            </code>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<div class="card" style="margin-top:1rem;">
     <div class="card-header">Recent Scans</div>
     {% if recent_scans %}
     <div class="table-wrap">
@@ -76,4 +128,12 @@
     </div>
     {% endif %}
 </div>
+
+<style>
+@media (max-width: 900px) {
+    div[style*="grid-template-columns:1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+    }
+}
+</style>
 {% endblock %}
