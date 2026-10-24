@@ -101,8 +101,8 @@
         {% endif %}
         {% if scan.status in ['completed', 'stopped'] %}
         <a href="{{ url_for('scan_commands', scan_id=scan.id) }}" class="btn btn-secondary btn-sm">Commands & Upload</a>
-        <a href="{{ url_for('export_findings', scan_id=scan.id, format='csv') }}" class="btn btn-sm" style="background:var(--green, #00c853); color:#fff;">📥 تصدير Findings (CSV)</a>
-        <a href="{{ url_for('export_findings', scan_id=scan.id, format='json') }}" class="btn btn-sm" style="background:var(--accent, #6c5ce7); color:#fff;">📥 تصدير Findings (JSON)</a>
+        <a href="{{ url_for('export_findings', scan_id=scan.id, format='csv') }}" class="btn btn-sm export-csv-link" style="background:var(--green, #00c853); color:#fff;">📥 تصدير Findings (CSV)</a>
+        <a href="{{ url_for('export_findings', scan_id=scan.id, format='json') }}" class="btn btn-sm export-json-link" style="background:var(--accent, #6c5ce7); color:#fff;">📥 تصدير Findings (JSON)</a>
         <form method="POST" action="{{ url_for('run_findings', scan_id=scan.id) }}" style="display:inline;">
             <button type="submit" class="btn btn-sm" style="background:var(--orange, #ff8800); color:#fff;">🔍 فحص الثغرات</button>
         </form>
@@ -473,11 +473,11 @@ document.addEventListener('DOMContentLoaded', function() {
         🔧 الأوامر والأدوات
     </a>
     <a href="{{ url_for('export_findings', scan_id=scan.id, format='csv') }}"
-       class="btn" style="background:var(--green, #00c853); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
+       class="btn export-csv-link" style="background:var(--green, #00c853); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
         📥 تصدير Findings (CSV)
     </a>
     <a href="{{ url_for('export_findings', scan_id=scan.id, format='json') }}"
-       class="btn" style="background:var(--green, #00c853); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
+       class="btn export-json-link" style="background:var(--green, #00c853); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
         📥 تصدير Findings (JSON)
     </a>
     <a href="{{ url_for('export_raw_scan', scan_id=scan.id) }}"
@@ -648,6 +648,7 @@ function filterFindings(type, btn) {
     btn.style.color = '#fff';
     btn.classList.add('active');
 
+    var visibleCount = 0;
     document.querySelectorAll('.finding-row').forEach(function(row) {
         var status = row.dataset.status;
         var detailId = row.querySelector('[id^="arrow-"]');
@@ -655,10 +656,23 @@ function filterFindings(type, btn) {
         var detailRow = idx ? document.getElementById('detail-' + idx) : null;
         var show = (type === 'all') || (status === type);
         row.style.display = show ? '' : 'none';
+        if (show) visibleCount++;
         if (detailRow && !show) {
             detailRow.style.display = 'none';
             if (detailId) detailId.innerHTML = '&#9654;';
         }
+    });
+
+    var scanId = window.location.pathname.split('/')[2];
+    var base = '/scan/' + scanId + '/export-findings';
+    var filterParam = (type && type !== 'all') ? '&filter=' + type : '';
+    document.querySelectorAll('.export-csv-link').forEach(function(a) {
+        a.href = base + '?format=csv' + filterParam;
+        a.textContent = '📥 تصدير Findings CSV (' + visibleCount + ')';
+    });
+    document.querySelectorAll('.export-json-link').forEach(function(a) {
+        a.href = base + '?format=json' + filterParam;
+        a.textContent = '📥 تصدير Findings JSON (' + visibleCount + ')';
     });
 }
 </script>

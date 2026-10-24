@@ -652,23 +652,35 @@ def findings_detail(scan_id):
 def export_findings(scan_id):
     conn = models.get_db()
     scan = conn.execute('SELECT * FROM scans WHERE id=?', (scan_id,)).fetchone()
-    findings = conn.execute(
-        'SELECT * FROM finding_results WHERE scan_id=? ORDER BY severity, ip, port',
-        (scan_id,)
-    ).fetchall()
-    conn.close()
     if not scan:
+        conn.close()
         flash('السكان غير موجود', 'error')
         return redirect(url_for('dashboard'))
 
+    filter_type = request.args.get('filter', '')
+    query = 'SELECT * FROM finding_results WHERE scan_id=?'
+    params = [scan_id]
+
+    if filter_type == 'vulnerable':
+        query += " AND status = 'vulnerable'"
+    elif filter_type == 'safe':
+        query += " AND status = 'safe'"
+    elif filter_type == 'error':
+        query += " AND status NOT IN ('vulnerable', 'safe')"
+
+    query += ' ORDER BY severity, ip, port'
+    findings = conn.execute(query, params).fetchall()
+    conn.close()
+
     fmt = request.args.get('format', 'csv')
+    filter_suffix = f'_{filter_type}' if filter_type and filter_type != 'all' else ''
 
     if fmt == 'json':
         data = [dict(f) for f in findings]
         return Response(
             json.dumps(data, indent=2, ensure_ascii=False),
             mimetype='application/json',
-            headers={'Content-Disposition': f'attachment; filename=findings_scan_{scan_id}.json'}
+            headers={'Content-Disposition': f'attachment; filename=findings_scan_{scan_id}{filter_suffix}.json'}
         )
     else:
         output = io.StringIO()
@@ -680,7 +692,7 @@ def export_findings(scan_id):
         return Response(
             output.getvalue(),
             mimetype='text/csv',
-            headers={'Content-Disposition': f'attachment; filename=findings_scan_{scan_id}.csv'}
+            headers={'Content-Disposition': f'attachment; filename=findings_scan_{scan_id}{filter_suffix}.csv'}
         )
 
 
