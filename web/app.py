@@ -4,6 +4,7 @@ import csv
 import re
 import json
 import signal
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
@@ -1163,6 +1164,271 @@ def run_findings(scan_id):
              '', info['category'])
         )
         count += 1
+
+    c.commit()
+
+    def _tool_exists(name):
+        return subprocess.run(f'which {name}', shell=True, capture_output=True).returncode == 0
+
+    def _run_cmd(cmd, timeout=15):
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+            return (r.stdout + r.stderr).strip()
+        except subprocess.TimeoutExpired:
+            return None
+        except Exception as e:
+            return f'Error: {e}'
+
+    def _save_svc_finding(fid, name, ip, port, sev, cvss, vuln, detail, cmd, cat, cve=None):
+        nonlocal count
+        status = classify_finding(vuln, detail, cmd)
+        c.execute(
+            '''INSERT INTO finding_results
+            (scan_id, ip, port, finding_id, finding_name, severity, cvss, cve, vulnerable, detail, command, category, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (scan_id, ip, port, fid, name, sev, cvss, cve or '', vuln, (detail or '')[:500], cmd, cat, status)
+        )
+        count += 1
+
+    for r in results:
+        ip = r['ip']
+        port = r['port']
+        service = (r['service'] or '').lower()
+        banner = (r['banner'] or '').lower()
+
+        # === MongoDB ===
+        if 'mongo' in service or port in (27017, 27018, 27019):
+            if _tool_exists('mongosh'):
+                out = _run_cmd(f'mongosh --host {ip} --port {port} --eval "db.adminCommand(\'listDatabases\')" --quiet 2>&1')
+                if out is None:
+                    _save_svc_finding('FIND-MONGO-NOAUTH', 'MongoDB No Authentication', ip, port,
+                                      'Critical', 9.8, 0, 'Connection timed out',
+                                      f'mongosh --host {ip} --port {port} --eval "db.adminCommand(\'listDatabases\')" --quiet',
+                                      'authentication')
+                elif 'databases' in out.lower() or '"name"' in out:
+                    _save_svc_finding('FIND-MONGO-NOAUTH', 'MongoDB No Authentication', ip, port,
+                                      'Critical', 9.8, 1, f'MongoDB accepts connections without authentication!\n{out[:400]}',
+                                      f'mongosh --host {ip} --port {port} --eval "db.adminCommand(\'listDatabases\')" --quiet',
+                                      'authentication')
+                    out2 = _run_cmd(f'mongosh --host {ip} --port {port} --eval "JSON.stringify(db.adminCommand(\'listDatabases\'))" --quiet 2>&1')
+                    if out2 and ('"name"' in out2 or 'databases' in out2.lower()):
+                        try:
+                            db_info = json.loads(out2)
+                            db_names = [d['name'] for d in db_info.get('databases', [])]
+                            total_size = db_info.get('totalSize', 0)
+                            detail3 = f'Databases: {", ".join(db_names)}\nTotal size: {total_size / 1024 / 1024:.1f} MB'
+                        except Exception:
+                            detail3 = f'Raw output: {out2[:300]}'
+                        _save_svc_finding('FIND-MONGO-DATA', 'MongoDB Data Exposure', ip, port,
+                                          'Critical', 9.8, 1, detail3,
+                                          f'mongosh --host {ip} --port {port} --eval "db.adminCommand(\'listDatabases\')" --quiet',
+                                          'data_exposure')
+                    out4 = _run_cmd(f'mongosh --host {ip} --port {port} --eval "JSON.stringify(rs.status())" --quiet 2>&1')
+                    if out4 and '"members"' in out4:
+                        _save_svc_finding('FIND-MONGO-REPL', 'MongoDB Replica Set Exposed', ip, port,
+                                          'High', 7.5, 1, f'Replica set info accessible: {out4[:300]}',
+                                          f'mongosh --host {ip} --port {port} --eval "rs.status()" --quiet',
+                                          'info_disclosure')
+                else:
+                    vuln = 0
+                    if 'auth' in out.lower() or 'unauthorized' in out.lower():
+                        det = f'Authentication required: {out[:200]}'
+                    else:
+                        det = f'Connection result: {out[:200]}'
+                    _save_svc_finding('FIND-MONGO-NOAUTH', 'MongoDB No Authentication', ip, port,
+                                      'Critical', 9.8, vuln, det,
+                                      f'mongosh --host {ip} --port {port} --eval "db.adminCommand(\'listDatabases\')" --quiet',
+                                      'authentication')
+
+        # === etcd ===
+        if 'etcd' in service or port in (2379, 2380, 2381):
+            proto = 'https' if port in (2379, 2380) else 'http'
+            out = _run_cmd(f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/version 2>&1')
+            if out and ('etcdserver' in out.lower() or 'etcdcluster' in out.lower()):
+                _save_svc_finding('FIND-ETCD-VER', 'etcd Version Disclosure', ip, port,
+                                  'Medium', 5.3, 1, f'etcd version exposed: {out[:200]}',
+                                  f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/version',
+                                  'info_disclosure')
+            else:
+                _save_svc_finding('FIND-ETCD-VER', 'etcd Version Disclosure', ip, port,
+                                  'Medium', 5.3, 0, f'Response: {(out or "Connection failed")[:200]}',
+                                  f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/version',
+                                  'info_disclosure')
+
+            if port == 2379:
+                out2 = _run_cmd(f'curl -sk --connect-timeout 5 -X POST {proto}://{ip}:{port}/v3/kv/range -d \'{{"key":"AA=="}}\' 2>&1')
+                if out2 and ('"kvs"' in out2 or '"key"' in out2):
+                    _save_svc_finding('FIND-ETCD-READ', 'etcd Anonymous Data Access', ip, port,
+                                      'Critical', 9.8, 1, f'etcd allows anonymous data read!\n{out2[:300]}',
+                                      f'curl -sk --connect-timeout 5 -X POST {proto}://{ip}:{port}/v3/kv/range',
+                                      'data_exposure')
+                elif out2:
+                    _save_svc_finding('FIND-ETCD-READ', 'etcd Anonymous Data Access', ip, port,
+                                      'Critical', 9.8, 0, f'Response: {out2[:200]}',
+                                      f'curl -sk --connect-timeout 5 -X POST {proto}://{ip}:{port}/v3/kv/range',
+                                      'data_exposure')
+
+            if port == 2381:
+                out3 = _run_cmd(f'curl -s --connect-timeout 5 http://{ip}:{port}/health 2>&1')
+                if out3 and ('health' in out3.lower() or 'true' in out3.lower()):
+                    _save_svc_finding('FIND-ETCD-HEALTH', 'etcd Health Endpoint Exposed', ip, port,
+                                      'Low', 3.7, 1, f'Health endpoint accessible: {out3[:200]}',
+                                      f'curl -s --connect-timeout 5 http://{ip}:{port}/health',
+                                      'info_disclosure')
+                out4 = _run_cmd(f'curl -s --connect-timeout 5 http://{ip}:{port}/metrics 2>&1 | head -20')
+                if out4 and ('etcd_' in out4 or 'grpc_' in out4 or 'process_' in out4):
+                    _save_svc_finding('FIND-ETCD-METRICS', 'etcd Metrics Exposed', ip, port,
+                                      'Medium', 5.3, 1, f'Metrics accessible:\n{out4[:300]}',
+                                      f'curl -s --connect-timeout 5 http://{ip}:{port}/metrics | head -20',
+                                      'info_disclosure')
+
+        # === Kubernetes API ===
+        if port in (6443, 8443) or 'kubernetes' in service:
+            out = _run_cmd(f'curl -sk --connect-timeout 5 https://{ip}:{port}/version 2>&1')
+            if out and ('"major"' in out or '"gitVersion"' in out):
+                _save_svc_finding('FIND-K8S-VER', 'Kubernetes API Version Disclosure', ip, port,
+                                  'Medium', 5.3, 1, f'K8s API version exposed: {out[:300]}',
+                                  f'curl -sk --connect-timeout 5 https://{ip}:{port}/version',
+                                  'info_disclosure')
+            else:
+                _save_svc_finding('FIND-K8S-VER', 'Kubernetes API Version Disclosure', ip, port,
+                                  'Medium', 5.3, 0, f'Response: {(out or "Connection failed")[:200]}',
+                                  f'curl -sk --connect-timeout 5 https://{ip}:{port}/version',
+                                  'info_disclosure')
+
+            out2 = _run_cmd(f'curl -sk --connect-timeout 5 https://{ip}:{port}/api/v1/namespaces 2>&1')
+            if out2 and ('"items"' in out2 or '"namespaces"' in out2.lower()):
+                _save_svc_finding('FIND-K8S-ANON', 'Kubernetes Anonymous API Access', ip, port,
+                                  'Critical', 9.8, 1, f'K8s API allows anonymous namespace listing!\n{out2[:300]}',
+                                  f'curl -sk --connect-timeout 5 https://{ip}:{port}/api/v1/namespaces',
+                                  'authentication')
+                out3 = _run_cmd(f'curl -sk --connect-timeout 5 https://{ip}:{port}/api/v1/secrets 2>&1')
+                if out3 and '"items"' in out3 and 'secret' in out3.lower():
+                    _save_svc_finding('FIND-K8S-SECRETS', 'Kubernetes Secrets Readable', ip, port,
+                                      'Critical', 9.8, 1, f'K8s secrets accessible anonymously!\n{out3[:300]}',
+                                      f'curl -sk --connect-timeout 5 https://{ip}:{port}/api/v1/secrets',
+                                      'data_exposure')
+            elif out2:
+                vuln2 = 0
+                if 'forbidden' in out2.lower() or 'unauthorized' in out2.lower():
+                    det2 = f'Access denied (good): {out2[:200]}'
+                else:
+                    det2 = f'Response: {out2[:200]}'
+                _save_svc_finding('FIND-K8S-ANON', 'Kubernetes Anonymous API Access', ip, port,
+                                  'Critical', 9.8, vuln2, det2,
+                                  f'curl -sk --connect-timeout 5 https://{ip}:{port}/api/v1/namespaces',
+                                  'authentication')
+
+        # === Kubelet ===
+        if port in (10250, 10255) or 'kubelet' in service:
+            proto = 'https' if port == 10250 else 'http'
+            out = _run_cmd(f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/pods 2>&1')
+            if out and ('"items"' in out or '"metadata"' in out):
+                _save_svc_finding('FIND-KUBELET-PODS', 'Kubelet Pods Endpoint Exposed', ip, port,
+                                  'High', 7.5, 1, f'Kubelet pods endpoint accessible!\n{out[:300]}',
+                                  f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/pods',
+                                  'info_disclosure')
+            elif out:
+                vuln = 0
+                det = f'Access denied (good): {out[:200]}' if ('unauthorized' in out.lower() or 'forbidden' in out.lower()) else f'Response: {out[:200]}'
+                _save_svc_finding('FIND-KUBELET-PODS', 'Kubelet Pods Endpoint Exposed', ip, port,
+                                  'High', 7.5, vuln, det,
+                                  f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/pods',
+                                  'info_disclosure')
+            out2 = _run_cmd(f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/metrics 2>&1 | head -20')
+            if out2 and ('kubelet_' in out2 or 'apiserver_' in out2 or 'process_' in out2):
+                _save_svc_finding('FIND-KUBELET-METRICS', 'Kubelet Metrics Exposed', ip, port,
+                                  'Medium', 5.3, 1, f'Kubelet metrics accessible:\n{out2[:300]}',
+                                  f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/metrics | head -20',
+                                  'info_disclosure')
+
+        # === OpenSearch/Elasticsearch ===
+        if 'elastic' in service or 'opensearch' in service or port in (9200, 9300):
+            proto = 'https' if port == 9200 else 'http'
+            out = _run_cmd(f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/ 2>&1')
+            if out and ('"cluster_name"' in out or '"version"' in out):
+                _save_svc_finding('FIND-ES-NOAUTH', 'OpenSearch/Elasticsearch No Authentication', ip, port,
+                                  'Critical', 9.8, 1, f'OpenSearch/ES accessible without auth!\n{out[:300]}',
+                                  f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/',
+                                  'authentication')
+                out3 = _run_cmd(f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/_cat/indices?v 2>&1')
+                if out3 and ('green' in out3 or 'yellow' in out3 or 'red' in out3):
+                    _save_svc_finding('FIND-ES-INDICES', 'OpenSearch Indices Exposed', ip, port,
+                                      'High', 7.5, 1, f'Indices accessible:\n{out3[:500]}',
+                                      f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/_cat/indices?v',
+                                      'data_exposure')
+            else:
+                _save_svc_finding('FIND-ES-NOAUTH', 'OpenSearch/Elasticsearch No Authentication', ip, port,
+                                  'Critical', 9.8, 0, f'Response: {(out or "Connection failed")[:200]}',
+                                  f'curl -sk --connect-timeout 5 {proto}://{ip}:{port}/',
+                                  'authentication')
+
+            out2 = _run_cmd(f'curl -sk --connect-timeout 5 -u admin:admin {proto}://{ip}:{port}/ 2>&1')
+            if out2 and '"cluster_name"' in out2:
+                _save_svc_finding('FIND-ES-DEFCRED', 'OpenSearch Default Credentials (admin:admin)', ip, port,
+                                  'Critical', 9.8, 1, f'Default admin:admin credentials work!\n{out2[:300]}',
+                                  f'curl -sk --connect-timeout 5 -u admin:admin {proto}://{ip}:{port}/',
+                                  'authentication')
+
+        # === MariaDB/MySQL ===
+        if 'mysql' in service or 'maria' in service or port in (3306,):
+            if _tool_exists('mysql'):
+                out = _run_cmd(f'mysql -h {ip} -P {port} -u root --connect-timeout=5 -e "SELECT VERSION(); SHOW DATABASES;" 2>&1')
+                if out is None:
+                    _save_svc_finding('FIND-MYSQL-NOPASS', 'MySQL/MariaDB Root No Password', ip, port,
+                                      'Critical', 9.8, 0, 'Connection timed out',
+                                      f'mysql -h {ip} -P {port} -u root --connect-timeout=5 -e "SELECT VERSION();"',
+                                      'authentication')
+                elif 'version()' in out.lower() or 'information_schema' in out.lower():
+                    _save_svc_finding('FIND-MYSQL-NOPASS', 'MySQL/MariaDB Root No Password', ip, port,
+                                      'Critical', 9.8, 1, f'MySQL root login without password!\n{out[:300]}',
+                                      f'mysql -h {ip} -P {port} -u root --connect-timeout=5 -e "SELECT VERSION(); SHOW DATABASES;"',
+                                      'authentication')
+                else:
+                    det = f'Root login denied (good): {out[:200]}' if 'access denied' in out.lower() else f'Response: {out[:200]}'
+                    _save_svc_finding('FIND-MYSQL-NOPASS', 'MySQL/MariaDB Root No Password', ip, port,
+                                      'Critical', 9.8, 0, det,
+                                      f'mysql -h {ip} -P {port} -u root --connect-timeout=5 -e "SELECT VERSION();"',
+                                      'authentication')
+
+                out2 = _run_cmd(f"mysql -h {ip} -P {port} -u root -p'root' --connect-timeout=5 -e \"SELECT VERSION();\" 2>&1")
+                if out2 and 'version()' in out2.lower() and 'access denied' not in out2.lower():
+                    _save_svc_finding('FIND-MYSQL-DEFCRED', 'MySQL Default Credentials (root:root)', ip, port,
+                                      'Critical', 9.8, 1, f'Default root:root credentials work!\n{out2[:200]}',
+                                      f"mysql -h {ip} -P {port} -u root -p'root' --connect-timeout=5 -e \"SELECT VERSION();\"",
+                                      'authentication')
+
+        # === Prometheus / Node Exporter ===
+        if port in (9090, 9100) or 'prometheus' in service:
+            out = _run_cmd(f'curl -s --connect-timeout 5 http://{ip}:{port}/metrics 2>&1 | head -20')
+            if out and ('node_' in out or 'process_' in out or 'go_' in out or 'prometheus_' in out):
+                _save_svc_finding('FIND-PROM-METRICS', 'Prometheus Metrics Exposed', ip, port,
+                                  'Medium', 5.3, 1, f'Metrics endpoint accessible:\n{out[:400]}',
+                                  f'curl -s --connect-timeout 5 http://{ip}:{port}/metrics | head -20',
+                                  'info_disclosure')
+
+        # === Tomcat ===
+        if 'tomcat' in service or 'coyote' in service or 'tomcat' in banner:
+            proto = 'https' if 'ssl' in banner else 'http'
+            for user, passwd in [('tomcat', 'tomcat'), ('admin', 'admin'), ('manager', 'manager')]:
+                auth = f'-u {user}:{passwd}'
+                out = _run_cmd(f'curl -sk --connect-timeout 5 {auth} {proto}://{ip}:{port}/manager/html 2>&1')
+                if out and '401' not in out and '403' not in out and ('manager' in out.lower() or 'deploy' in out.lower()):
+                    _save_svc_finding(f'FIND-TOMCAT-CRED-{user}', f'Tomcat Manager Default Credentials ({user}:{passwd})', ip, port,
+                                      'Critical', 9.8, 1, f'Tomcat Manager accessible with {user}:{passwd}!\n{out[:200]}',
+                                      f'curl -sk --connect-timeout 5 {auth} {proto}://{ip}:{port}/manager/html',
+                                      'authentication')
+                    break
+
+        # === gRPC ===
+        if 'grpc' in service:
+            if _tool_exists('grpcurl'):
+                out = _run_cmd(f'grpcurl -plaintext {ip}:{port} list 2>&1')
+                if out and 'failed' not in out.lower() and 'error' not in out.lower() and out.strip():
+                    _save_svc_finding('FIND-GRPC-LIST', 'gRPC Services Exposed', ip, port,
+                                      'Medium', 5.3, 1, f'gRPC services listed:\n{out[:400]}',
+                                      f'grpcurl -plaintext {ip}:{port} list',
+                                      'info_disclosure')
 
     c.commit()
     c.close()
