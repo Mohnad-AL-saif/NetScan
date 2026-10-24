@@ -21,8 +21,23 @@ def clean_banner(banner):
     return banner.strip()
 
 
+def _keyscan_targets(target):
+    for t in target.replace(',', ' ').split():
+        t = t.strip()
+        if t:
+            try:
+                subprocess.run(
+                    f'ssh-keyscan -T 3 {shlex.quote(t)} >> ~/.ssh/known_hosts 2>/dev/null',
+                    shell=True, timeout=5, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            except Exception:
+                pass
+
+
 def run_phase1_streaming(target, tcp_args, callback=None, controller=None):
     """Phase 1: Fast TCP port discovery with real-time callback."""
+    _keyscan_targets(target)
     cmd = f'sudo nmap {tcp_args} {target}'
     proc = subprocess.Popen(
         cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -73,8 +88,11 @@ def run_phase2(target, ports_list, controller=None):
     if not ports_list:
         return [], ''
 
+    if 22 in ports_list:
+        _keyscan_targets(target)
+
     ports_csv = ','.join(str(p) for p in ports_list)
-    cmd = f'sudo nmap -p{ports_csv} -sV --script "default and not (ssh-* or auth-*)" --min-rate 5000 -n -Pn --script-args ssh.timeout=5 -oX - {target}'
+    cmd = f'sudo nmap -p{ports_csv} -sV --script "default and not (ssh-* or auth-* or brute or *login*)" --script-args ssh.timeout=5,userdb=/dev/null,passdb=/dev/null --min-rate 5000 -n -Pn -oX - {target}'
 
     proc = subprocess.Popen(
         cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
