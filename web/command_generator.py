@@ -6,6 +6,27 @@ import os
 import re
 import json
 
+
+def make_non_interactive(cmd):
+    if any(tool in cmd for tool in ['ssh ', 'scp ', 'sftp ', 'ssh-audit']):
+        if '-o StrictHostKeyChecking' not in cmd:
+            parts = cmd.split(' ', 1)
+            cmd = f'{parts[0]} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {parts[1]}'
+
+    if 'nmap' in cmd and 'ssh' in cmd and '--script-args' not in cmd:
+        cmd += ' --script-args ssh.timeout=5'
+
+    if 'curl ' in cmd and '--max-time' not in cmd:
+        cmd = cmd.replace('curl ', 'curl --max-time 10 -s -k ', 1)
+
+    if 'openssl s_client' in cmd:
+        if 'echo' not in cmd:
+            cmd = f'echo | {cmd}'
+        if '-connect' in cmd and '2>/dev/null' not in cmd:
+            cmd += ' 2>/dev/null'
+
+    return cmd
+
 # Path to findings database
 FINDINGS_PATH = os.path.join(os.path.dirname(__file__), '..', 'findings', 'port_findings.json')
 
@@ -199,8 +220,7 @@ def generate_commands_for_scan(scan_id, get_db_func):
             if not raw_cmd:
                 continue
 
-            # Replace placeholders
-            cmd = raw_cmd.replace('{target}', ip).replace('{port}', str(port))
+            cmd = make_non_interactive(raw_cmd.replace('{target}', ip).replace('{port}', str(port)))
 
             # Deduplicate identical commands
             cmd_key = cmd

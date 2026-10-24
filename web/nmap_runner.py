@@ -1,7 +1,15 @@
+import os
 import subprocess
 import re
 import xml.etree.ElementTree as ET
 import shlex
+
+
+def get_scan_env():
+    env = os.environ.copy()
+    env['GIT_SSH_COMMAND'] = 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+    env['ANSIBLE_HOST_KEY_CHECKING'] = 'False'
+    return env
 
 
 def clean_banner(banner):
@@ -17,7 +25,8 @@ def run_phase1_streaming(target, tcp_args, callback=None, controller=None):
     """Phase 1: Fast TCP port discovery with real-time callback."""
     cmd = f'sudo nmap {tcp_args} {target}'
     proc = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, text=True, env=get_scan_env()
     )
     if controller:
         controller.register_nmap(proc.pid)
@@ -65,15 +74,16 @@ def run_phase2(target, ports_list, controller=None):
         return [], ''
 
     ports_csv = ','.join(str(p) for p in ports_list)
-    cmd = f'sudo nmap -p{ports_csv} -sCV --min-rate 5000 -n -Pn -oX - {target}'
+    cmd = f'sudo nmap -p{ports_csv} -sCV --min-rate 5000 -n -Pn --script-args ssh.timeout=5 -oX - {target}'
 
     proc = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE, text=True, env=get_scan_env()
     )
     if controller:
         controller.register_nmap(proc.pid)
 
-    stdout, stderr = proc.communicate(timeout=600)
+    stdout, stderr = proc.communicate(input='yes\n' * 20, timeout=600)
     return parse_nmap_xml(stdout, target), cmd
 
 
@@ -81,7 +91,8 @@ def run_udp_phase1(target, udp_args, controller=None):
     """Phase 3: UDP port discovery."""
     cmd = f'sudo nmap {udp_args} {target}'
     proc = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, text=True, env=get_scan_env()
     )
     if controller:
         controller.register_nmap(proc.pid)
@@ -129,12 +140,13 @@ def run_udp_phase2(target, udp_ports, controller=None):
     cmd = f'sudo nmap -sUV -p{ports_csv} --min-rate 3000 -n -Pn -oX - {target}'
 
     proc = subprocess.Popen(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE, text=True, env=get_scan_env()
     )
     if controller:
         controller.register_nmap(proc.pid)
 
-    stdout, stderr = proc.communicate(timeout=600)
+    stdout, stderr = proc.communicate(input='yes\n' * 20, timeout=600)
     return parse_nmap_xml(stdout, target, default_protocol='udp'), cmd
 
 
