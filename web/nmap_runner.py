@@ -74,7 +74,7 @@ def run_phase2(target, ports_list, controller=None):
         return [], ''
 
     ports_csv = ','.join(str(p) for p in ports_list)
-    cmd = f'sudo nmap -p{ports_csv} -sCV --min-rate 5000 -n -Pn --script-args ssh.timeout=5 -oX - {target}'
+    cmd = f'sudo nmap -p{ports_csv} -sV --script "default and not (ssh-* or auth-*)" --min-rate 5000 -n -Pn --script-args ssh.timeout=5 -oX - {target}'
 
     proc = subprocess.Popen(
         cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
