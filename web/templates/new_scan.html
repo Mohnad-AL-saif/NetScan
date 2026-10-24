@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}New Scan — NetScan{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>New Scan</h1>
+</div>
+
+<div class="card" style="max-width: 700px;">
+    <form method="POST" action="{{ url_for('new_scan') }}">
+        <div class="form-group">
+            <label for="name">Scan Name</label>
+            <input type="text" id="name" name="name" class="form-control" placeholder="e.g. Production Web Servers">
+        </div>
+
+        <div class="form-group">
+            <label for="targets">Targets</label>
+            <textarea id="targets" name="targets" class="form-control" rows="3" placeholder="IP, CIDR, or hostname. One per line or comma-separated." required></textarea>
+            <div class="form-help">e.g. 192.168.1.0/24, 10.0.0.1, example.com</div>
+        </div>
+
+        <div class="form-group">
+            <label for="tcp_args">TCP Scan Arguments</label>
+            <input type="text" id="tcp_args" name="tcp_args" class="form-control" value="-sS -p- --min-rate 5000 -T4 -n -Pn">
+            <div class="form-help">Phase 1 nmap flags for TCP port discovery. -sV is added automatically in Phase 2.</div>
+        </div>
+
+        <div class="form-group" style="display:flex; align-items:center; gap:12px; margin-top:1.25rem;">
+            <label class="toggle-switch">
+                <input type="checkbox" name="udp_scan" id="udp-toggle">
+                <span class="slider"></span>
+            </label>
+            <label for="udp-toggle" style="cursor:pointer; margin-bottom:0;">Include UDP Scan</label>
+            <span class="text-dim text-sm">(slower)</span>
+        </div>
+
+        <div class="form-group" id="udp-args-group" style="display:none; margin-top:0.75rem;">
+            <label for="udp_args">UDP Scan Arguments</label>
+            <input type="text" id="udp_args" name="udp_args" class="form-control" value="-sU --top-ports 100 --min-rate 3000 -T4 -n -Pn">
+            <div class="form-help">UDP is slower — default scans top 100 ports. Use -sU -p- for full UDP scan.</div>
+        </div>
+
+        <div style="display:flex; gap:0.75rem; margin-top:1.25rem;">
+            <button type="submit" class="btn btn-primary">Start Scan</button>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('udp-toggle').addEventListener('change', function() {
+    document.getElementById('udp-args-group').style.display = this.checked ? 'block' : 'none';
+});
+</script>
+{% endblock %}

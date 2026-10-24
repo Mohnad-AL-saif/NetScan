@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block title %}الأوامر - {{ scan.target }} - NetScan{% endblock %}
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+    <div>
+        <h1 style="font-size:1.5rem;">🔧 الأوامر الموصى بها</h1>
+        <p style="color:var(--text-dim); font-size:0.9rem;">
+            شغّل الأوامر في الترمنال، بعدين ارفع المخرجات هنا للتحليل
+        </p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+        <span class="badge" style="background:var(--accent); padding:6px 12px; border-radius:6px; font-size:0.9rem;">
+            {{ total_commands }} أمر
+        </span>
+        <a href="{{ url_for('scan_detail', scan_id=scan.id) }}" class="btn btn-outline btn-sm">← رجوع</a>
+    </div>
+</div>
+
+<!-- Copy All -->
+<button class="btn btn-sm" id="copyAll" style="margin-bottom:1rem; background:var(--accent); color:#fff;">
+    📋 نسخ كل الأوامر
+</button>
+
+{% for category, commands in grouped_commands.items() %}
+<div class="card" style="margin-bottom:1rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem;">
+        <h3 style="font-size:1.1rem; margin:0;">{{ category }}</h3>
+        <span class="badge" style="background:var(--bg-dim); padding:4px 8px; border-radius:4px;">
+            {{ commands|length }} أمر
+        </span>
+    </div>
+    <div style="overflow-x:auto;">
+        <table class="results-table" style="width:100%;">
+            <thead>
+                <tr>
+                    <th style="width:8%">IP</th>
+                    <th style="width:5%">Port</th>
+                    <th style="width:18%">الأداة</th>
+                    <th>الأمر</th>
+                    <th style="width:5%">Severity</th>
+                    <th style="width:15%">إجراءات</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for cmd in commands %}
+                <tr>
+                    <td><code style="font-size:0.8rem;">{{ cmd.ip }}</code></td>
+                    <td><span class="badge" style="background:var(--accent-dim); padding:2px 6px; border-radius:4px;">{{ cmd.port }}</span></td>
+                    <td>
+                        <strong>{{ cmd.tool }}</strong>
+                        <br><small style="color:var(--text-dim);">{{ cmd.description[:60] }}</small>
+                    </td>
+                    <td>
+                        <code class="cmd-code" style="display:block; padding:6px 8px; background:var(--bg-dark, #1a1a2e); color:var(--green, #0f0); border-radius:4px; font-size:0.8rem; white-space:pre-wrap; word-break:break-all;">{{ cmd.command }}</code>
+                    </td>
+                    <td>
+                        {% if cmd.severity == 'Critical' %}
+                        <span style="color:#ff4444; font-weight:bold;">{{ cmd.severity }}</span>
+                        {% elif cmd.severity == 'High' %}
+                        <span style="color:#ff8800; font-weight:bold;">{{ cmd.severity }}</span>
+                        {% elif cmd.severity == 'Medium' %}
+                        <span style="color:#ffcc00;">{{ cmd.severity }}</span>
+                        {% else %}
+                        <span style="color:var(--text-dim);">{{ cmd.severity }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-outline copy-cmd" data-cmd="{{ cmd.command }}" style="font-size:0.75rem; margin-bottom:4px;">
+                            📋 نسخ
+                        </button>
+                        <a href="{{ url_for('upload_command_output', scan_id=scan.id, cmd_id=cmd.id) }}"
+                           class="btn btn-sm" style="font-size:0.75rem; background:var(--green); color:#fff;">
+                            📤 رفع
+                        </a>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endfor %}
+
+<!-- Bulk Upload -->
+<div class="card" style="margin-top:1.5rem; border:2px solid var(--green);">
+    <h3 style="font-size:1.1rem; color:var(--green);">📤 رفع جميع المخرجات دفعة واحدة</h3>
+    <p style="color:var(--text-dim); font-size:0.9rem;">يمكنك لصق المخرجات المجمعة أو رفع ملفات</p>
+    <form method="POST" action="{{ url_for('upload_bulk_output', scan_id=scan.id) }}" enctype="multipart/form-data">
+        <div style="margin-bottom:1rem;">
+            <label style="font-weight:bold; display:block; margin-bottom:4px;">لصق المخرجات</label>
+            <textarea name="paste_content" style="width:100%; height:200px; font-family:monospace; background:var(--bg-dim); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px; resize:vertical;"
+                placeholder="الصق مخرجات الأوامر هنا..."></textarea>
+        </div>
+        <div style="margin-bottom:1rem;">
+            <label style="font-weight:bold; display:block; margin-bottom:4px;">أو ارفع ملفات</label>
+            <input type="file" name="output_files" multiple accept=".txt,.log,.xml,.json,.html"
+                   style="background:var(--bg-dim); border:1px solid var(--border); border-radius:6px; padding:6px; width:100%;">
+            <small style="color:var(--text-dim);">يمكنك اختيار عدة ملفات</small>
+        </div>
+        <button type="submit" class="btn" style="background:var(--green); color:#fff;">
+            🔍 تحليل المخرجات وإنتاج النتائج
+        </button>
+    </form>
+</div>
+
+<script>
+// Copy single command
+document.querySelectorAll('.copy-cmd').forEach(btn => {
+    btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(btn.dataset.cmd);
+        const orig = btn.textContent;
+        btn.textContent = '✅ تم';
+        setTimeout(() => btn.textContent = orig, 1500);
+    });
+});
+
+// Copy all commands
+document.getElementById('copyAll').addEventListener('click', () => {
+    const allCmds = [...document.querySelectorAll('.copy-cmd')]
+        .map(b => b.dataset.cmd).join('\n\n');
+    navigator.clipboard.writeText(allCmds);
+    const btn = document.getElementById('copyAll');
+    btn.textContent = '✅ تم نسخ الكل!';
+    setTimeout(() => btn.textContent = '📋 نسخ كل الأوامر', 1500);
+});
+</script>
+{% endblock %}

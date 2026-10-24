@@ -1,0 +1,38 @@
+# Database
+*.db
+scanner.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Scan outputs (may contain sensitive IPs)
+scan_outputs/
+uploads/
+
+# Prompt files (not part of the app)
+*.prompt.md
+*_PROMPT.md
+*_PROMPT*.md
+NPT_*.md
+
+# Scratch / duplicate files
+asd
+*\ (1)*
+
+# Version cache (regenerated at runtime)
+findings/version_cache.json
+findings/latest_versions.json

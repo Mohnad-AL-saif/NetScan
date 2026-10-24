@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Settings — NetScan{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Settings</h1>
+</div>
+
+<div class="card" style="max-width: 600px;">
+    <form method="POST" action="{{ url_for('settings') }}">
+        <div class="form-group">
+            <label for="setting_default_ports">Default Port Selection</label>
+            <select id="setting_default_ports" name="setting_default_ports" class="form-control">
+                <option value="--top-ports 20" {% if settings.get('default_ports') == '--top-ports 20' %}selected{% endif %}>Top 20 ports</option>
+                <option value="--top-ports 100" {% if settings.get('default_ports', '--top-ports 100') == '--top-ports 100' %}selected{% endif %}>Top 100 ports</option>
+                <option value="--top-ports 1000" {% if settings.get('default_ports') == '--top-ports 1000' %}selected{% endif %}>Top 1000 ports</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="setting_scan_timeout">Scan Timeout (seconds)</label>
+            <input type="number" id="setting_scan_timeout" name="setting_scan_timeout" class="form-control" value="{{ settings.get('scan_timeout', '600') }}" min="60" max="3600">
+            <div class="form-help">Maximum time for nmap to run (60–3600 seconds)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="setting_check_timeout">Finding Check Timeout (seconds)</label>
+            <input type="number" id="setting_check_timeout" name="setting_check_timeout" class="form-control" value="{{ settings.get('check_timeout', '10') }}" min="3" max="30">
+            <div class="form-help">Timeout for each individual finding check (3–30 seconds)</div>
+        </div>
+
+        <div class="form-group">
+            <label for="setting_default_extra_args">Default Extra Nmap Arguments</label>
+            <input type="text" id="setting_default_extra_args" name="setting_default_extra_args" class="form-control" value="{{ settings.get('default_extra_args', '') }}" placeholder="e.g. -T4">
+            <div class="form-help">Additional nmap flags added to every scan</div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top:0.5rem;">Save Settings</button>
+    </form>
+</div>
+
+<div class="card" style="max-width: 600px; margin-top: 1.5rem;">
+    <h3 style="margin-bottom: 0.75rem;">Version Database</h3>
+    <p class="text-dim" style="margin-bottom: 0.75rem;">
+        Last updated: <strong>{{ version_db_date or 'Never' }}</strong>
+    </p>
+    <form method="POST" action="{{ url_for('update_versions') }}">
+        <button type="submit" class="btn btn-accent">Update Now</button>
+    </form>
+    <p class="text-dim" style="margin-top:0.75rem; font-size:0.85rem;">
+        Fetches latest versions from endoflife.date for outdated version detection during scans.
+        Set up a cron job for automatic updates:
+    </p>
+    <code style="display:block; padding:0.5rem; margin-top:0.5rem; background:#0a0c10; border-radius:4px; color:var(--green); font-family:'SF Mono',Consolas,monospace; font-size:0.8rem;">0 3 * * 0 cd ~/Port_scanner_project && python3 update_versions.py</code>
+</div>
+{% endblock %}

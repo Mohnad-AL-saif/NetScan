@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — NetScan{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <a href="{{ url_for('new_scan') }}" class="btn btn-primary">+ New Scan</a>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Total Scans</div>
+        <div class="stat-value">{{ stats.scan_count }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Total Findings</div>
+        <div class="stat-value">{{ stats.total_findings }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Critical Findings</div>
+        <div class="stat-value text-red">{{ stats.critical_findings }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">Recent Scans</div>
+    {% if recent_scans %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                    <th>Critical</th>
+                    <th>High</th>
+                    <th>Medium</th>
+                    <th>Low</th>
+                    <th>Date</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for scan in recent_scans %}
+                {% set sf = scan_findings.get(scan.id, {}) %}
+                <tr>
+                    <td><a href="{{ url_for('scan_detail', scan_id=scan.id) }}">{{ scan.name }}</a></td>
+                    <td class="mono text-dim">{{ scan.targets|truncate(30) }}</td>
+                    <td>
+                        {% if scan.status == 'running' %}
+                        <span class="badge badge-running">Running</span>
+                        {% elif scan.status == 'completed' %}
+                        <span class="badge badge-complete">Complete</span>
+                        {% elif scan.status == 'failed' %}
+                        <span class="badge badge-failed">Failed</span>
+                        {% elif scan.status == 'stopped' %}
+                        <span class="badge badge-stopped">Stopped</span>
+                        {% else %}
+                        <span class="badge badge-running">{{ scan.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{% if sf.get('critical') %}<span class="badge badge-critical">{{ sf.critical }}</span>{% else %}<span class="text-dim">0</span>{% endif %}</td>
+                    <td>{% if sf.get('high') %}<span class="badge badge-high">{{ sf.high }}</span>{% else %}<span class="text-dim">0</span>{% endif %}</td>
+                    <td>{% if sf.get('medium') %}<span class="badge badge-medium">{{ sf.medium }}</span>{% else %}<span class="text-dim">0</span>{% endif %}</td>
+                    <td>{% if sf.get('low') %}<span class="badge badge-low">{{ sf.low }}</span>{% else %}<span class="text-dim">0</span>{% endif %}</td>
+                    <td class="text-dim text-sm">{{ scan.created_at }}</td>
+                    <td><a href="{{ url_for('scan_detail', scan_id=scan.id) }}" class="btn btn-sm btn-secondary">View</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No scans yet. Start by creating a new scan.</p>
+        <a href="{{ url_for('new_scan') }}" class="btn btn-primary mt-2">+ New Scan</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

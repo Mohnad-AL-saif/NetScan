@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Import Scan — NetScan{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Import Scan Results</h1>
+</div>
+
+<div class="card" style="max-width: 800px;">
+    <p class="text-dim mb-2">Import nmap output or a list of open ports. Findings checks will run automatically.</p>
+
+    <form method="POST" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="scan_name">Scan Name</label>
+            <input type="text" id="scan_name" name="scan_name" class="form-control" placeholder="e.g. Production Server Audit" required>
+        </div>
+
+        <div class="form-group">
+            <label for="target">Target IP / Host</label>
+            <input type="text" id="target" name="target" class="form-control" placeholder="e.g. 192.168.1.100" required>
+            <div class="form-help">Used as default IP when input doesn't include one</div>
+        </div>
+
+        <div class="tabs" style="margin-top: 1rem;">
+            <button type="button" class="tab-btn active" onclick="switchImportTab('paste', this)">Paste Output</button>
+            <button type="button" class="tab-btn" onclick="switchImportTab('file', this)">Upload File</button>
+        </div>
+
+        <div id="tab-paste" class="tab-content active">
+            <div class="form-group">
+                <label for="paste_content">Paste nmap output, or a simple list of ports</label>
+                <textarea id="paste_content" name="paste_content" class="form-control mono" rows="14"
+                    style="font-size:0.8rem; min-height:250px;"
+                    placeholder="Accepted formats:
+
+1) nmap text output:
+PORT     STATE SERVICE  VERSION
+22/tcp   open  ssh      OpenSSH 8.9p1
+80/tcp   open  http     nginx 1.18.0
+443/tcp  open  ssl/http nginx 1.18.0
+
+2) Simple port list (one per line):
+22
+80
+443
+3306
+
+3) IP:Port format:
+192.168.1.100:22
+192.168.1.100:80
+
+4) nmap XML (paste the full XML)"></textarea>
+            </div>
+        </div>
+
+        <div id="tab-file" class="tab-content">
+            <div class="form-group" style="padding: 1rem 0;">
+                <label for="scan_file">Upload nmap output file</label>
+                <input type="file" id="scan_file" name="scan_file" class="form-control"
+                    accept=".xml,.txt,.nmap,.gnmap,.log">
+                <div class="form-help">Supported: nmap XML (-oX), nmap text (-oN), greppable (-oG), or plain text port list</div>
+            </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 0.5rem;">
+            <label class="checkbox-label" style="cursor: pointer;">
+                <input type="checkbox" name="run_findings" checked style="accent-color: var(--accent);">
+                Run findings checks after import
+            </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top: 0.5rem;">Import & Analyze</button>
+    </form>
+</div>
+
+<div class="card" style="max-width: 800px; margin-top: 1rem;">
+    <div class="card-header">Supported Input Formats</div>
+    <table style="width:100%; font-size: 0.85rem;">
+        <thead>
+            <tr><th>Format</th><th>Example</th><th>Auto-detected by</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>nmap XML (-oX)</td><td class="mono text-dim">&lt;?xml ...&gt;&lt;nmaprun...&gt;</td><td>XML prefix</td></tr>
+            <tr><td>nmap text (-oN)</td><td class="mono text-dim">22/tcp open ssh OpenSSH 8.9</td><td>PORT STATE SERVICE pattern</td></tr>
+            <tr><td>nmap greppable (-oG)</td><td class="mono text-dim">Host: 1.2.3.4 Ports: 22/open/tcp//ssh//</td><td>Host: prefix</td></tr>
+            <tr><td>Simple port list</td><td class="mono text-dim">22\n80\n443</td><td>One number per line</td></tr>
+            <tr><td>IP:Port list</td><td class="mono text-dim">192.168.1.1:22</td><td>ip:port pattern</td></tr>
+            <tr><td>Comma-separated</td><td class="mono text-dim">22,80,443,8080</td><td>Comma-separated numbers</td></tr>
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function switchImportTab(name, btn) {
+    document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
+    document.querySelectorAll('.tab-content').forEach(function(c){ c.classList.remove('active'); });
+    document.getElementById('tab-' + name).classList.add('active');
+    btn.classList.add('active');
+}
+</script>
+{% endblock %}

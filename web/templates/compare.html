@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Compare Scans — NetScan{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Compare Scans</h1>
+</div>
+
+<form method="GET" action="{{ url_for('compare') }}">
+    <div class="form-row" style="max-width:700px; margin-bottom:1.25rem;">
+        <div class="form-group">
+            <label for="scan1">Scan A</label>
+            <select id="scan1" name="scan1" class="form-control">
+                <option value="">Select scan...</option>
+                {% for s in scans %}
+                <option value="{{ s.id }}" {% if scan1 and scan1.id == s.id %}selected{% endif %}>{{ s.name }} ({{ s.created_at }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="scan2">Scan B</label>
+            <select id="scan2" name="scan2" class="form-control">
+                <option value="">Select scan...</option>
+                {% for s in scans %}
+                <option value="{{ s.id }}" {% if scan2 and scan2.id == s.id %}selected{% endif %}>{{ s.name }} ({{ s.created_at }})</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary mb-2">Compare</button>
+</form>
+
+{% if scan1 and scan2 %}
+<div class="compare-grid">
+    <div class="card">
+        <div class="card-header">{{ scan1.name }}</div>
+        <div class="text-dim text-sm mb-1">{{ scan1.targets }} &middot; {{ scan1.created_at }}</div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+            <span class="badge badge-complete">{{ results1|length }} services</span>
+        </div>
+        <h4 class="text-sm mb-1" style="color:var(--text-dim);">OPEN SERVICES</h4>
+        <div class="table-wrap mb-2">
+            <table>
+                <thead><tr><th>IP</th><th>Port</th><th>Service</th></tr></thead>
+                <tbody>
+                    {% for r in results1 %}
+                    <tr>
+                        <td class="mono">{{ r.ip }}</td>
+                        <td class="mono">{{ r.port }}</td>
+                        <td>{{ r.service }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <h4 class="text-sm mb-1" style="color:var(--text-dim);">FINDINGS</h4>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Sev</th><th>Finding</th><th>Port</th></tr></thead>
+                <tbody>
+                    {% for f in findings1 %}
+                    <tr>
+                        <td>
+                            {% if f.severity == 'Critical' %}<span class="badge badge-critical">C</span>
+                            {% elif f.severity == 'High' %}<span class="badge badge-high">H</span>
+                            {% elif f.severity == 'Medium' %}<span class="badge badge-medium">M</span>
+                            {% elif f.severity == 'Low' %}<span class="badge badge-low">L</span>
+                            {% else %}<span class="badge badge-info">I</span>{% endif %}
+                        </td>
+                        <td>{{ f.finding_name }}</td>
+                        <td class="mono">{{ f.port }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">{{ scan2.name }}</div>
+        <div class="text-dim text-sm mb-1">{{ scan2.targets }} &middot; {{ scan2.created_at }}</div>
+        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+            <span class="badge badge-complete">{{ results2|length }} services</span>
+        </div>
+        <h4 class="text-sm mb-1" style="color:var(--text-dim);">OPEN SERVICES</h4>
+        <div class="table-wrap mb-2">
+            <table>
+                <thead><tr><th>IP</th><th>Port</th><th>Service</th></tr></thead>
+                <tbody>
+                    {% for r in results2 %}
+                    <tr>
+                        <td class="mono">{{ r.ip }}</td>
+                        <td class="mono">{{ r.port }}</td>
+                        <td>{{ r.service }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <h4 class="text-sm mb-1" style="color:var(--text-dim);">FINDINGS</h4>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Sev</th><th>Finding</th><th>Port</th></tr></thead>
+                <tbody>
+                    {% for f in findings2 %}
+                    <tr>
+                        <td>
+                            {% if f.severity == 'Critical' %}<span class="badge badge-critical">C</span>
+                            {% elif f.severity == 'High' %}<span class="badge badge-high">H</span>
+                            {% elif f.severity == 'Medium' %}<span class="badge badge-medium">M</span>
+                            {% elif f.severity == 'Low' %}<span class="badge badge-low">L</span>
+                            {% else %}<span class="badge badge-info">I</span>{% endif %}
+                        </td>
+                        <td>{{ f.finding_name }}</td>
+                        <td class="mono">{{ f.port }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% elif not scan1 and not scan2 %}
+<div class="empty-state"><p>Select two scans above to compare their results.</p></div>
+{% endif %}
+{% endblock %}

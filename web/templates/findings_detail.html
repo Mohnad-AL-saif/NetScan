@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Findings — {{ scan.name }} — NetScan{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Findings: {{ scan.name }}</h1>
+        <div class="text-dim text-sm mt-1">Target: <span class="mono">{{ scan.targets }}</span></div>
+    </div>
+    <div class="btn-group">
+        <a href="{{ url_for('findings_detail', scan_id=scan.id, export='json') }}" class="btn btn-secondary btn-sm">Export JSON</a>
+        <a href="{{ url_for('scan_detail', scan_id=scan.id) }}" class="btn btn-secondary btn-sm">Back to Scan</a>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Total Vulnerabilities</div>
+        <div class="stat-value text-red">{{ finding_stats.total }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Critical</div>
+        <div class="stat-value text-red">{{ finding_stats.critical }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">High</div>
+        <div class="stat-value text-orange">{{ finding_stats.high }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Medium</div>
+        <div class="stat-value text-blue">{{ finding_stats.medium }}</div>
+    </div>
+</div>
+
+<form method="GET" action="{{ url_for('findings_detail', scan_id=scan.id) }}">
+    <div class="filters">
+        <div class="filter-group">
+            <label>Severity:</label>
+            <select name="severity" class="form-control" style="width:auto;min-width:100px;">
+                <option value="">All</option>
+                <option value="Critical" {% if filter_severity == 'Critical' %}selected{% endif %}>Critical</option>
+                <option value="High" {% if filter_severity == 'High' %}selected{% endif %}>High</option>
+                <option value="Medium" {% if filter_severity == 'Medium' %}selected{% endif %}>Medium</option>
+                <option value="Low" {% if filter_severity == 'Low' %}selected{% endif %}>Low</option>
+                <option value="Info" {% if filter_severity == 'Info' %}selected{% endif %}>Info</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="port_filter">Port:</label>
+            <select name="port" class="form-control" id="port_filter" style="width:auto;min-width:100px;">
+                <option value="">All</option>
+                {% for p in ports_list %}
+                <option value="{{ p }}" {% if filter_port == p|string %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="category_filter">Category:</label>
+            <select name="category" class="form-control" id="category_filter" style="width:auto;min-width:120px;">
+                <option value="">All</option>
+                {% for c in categories %}
+                <option value="{{ c }}" {% if filter_category == c %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-sm btn-primary">Filter</button>
+    </div>
+</form>
+
+{% if findings %}
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th style="width:30px;"></th>
+                <th>Severity</th>
+                <th>Finding</th>
+                <th>IP</th>
+                <th>Port</th>
+                <th>Category</th>
+                <th>CVE</th>
+                <th>CVSS</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in findings %}
+            <tr class="expand-toggle" onclick="toggleDetail({{ loop.index }})">
+                <td class="text-dim" id="arrow-{{ loop.index }}">&#9654;</td>
+                <td>
+                    {% if f.severity == 'Critical' %}<span class="badge badge-critical">Critical</span>
+                    {% elif f.severity == 'High' %}<span class="badge badge-high">High</span>
+                    {% elif f.severity == 'Medium' %}<span class="badge badge-medium">Medium</span>
+                    {% elif f.severity == 'Low' %}<span class="badge badge-low">Low</span>
+                    {% else %}<span class="badge badge-info">Info</span>{% endif %}
+                </td>
+                <td>{{ f.finding_name }}</td>
+                <td class="mono">{{ f.ip }}</td>
+                <td class="mono">{{ f.port }}</td>
+                <td class="text-dim text-sm">{{ f.category }}</td>
+                <td class="mono text-dim">{{ f.cve or '—' }}</td>
+                <td class="mono">{{ f.cvss }}</td>
+            </tr>
+            <tr class="expandable-detail" id="detail-{{ loop.index }}">
+                <td colspan="8">
+                    {% if f.command %}
+                    <div class="text-dim text-sm mb-1">Command:</div>
+                    <div class="detail-output mb-1">{{ f.command }}</div>
+                    {% endif %}
+                    <div class="text-dim text-sm mb-1">Output:</div>
+                    <div class="detail-output">{{ f.detail or 'No output captured.' }}</div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="empty-state"><p>No vulnerabilities match the current filters.</p></div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleDetail(idx) {
+    var row = document.getElementById('detail-' + idx);
+    var arrow = document.getElementById('arrow-' + idx);
+    if (row.style.display === 'table-row') {
+        row.style.display = 'none';
+        arrow.innerHTML = '&#9654;';
+    } else {
+        row.style.display = 'table-row';
+        arrow.innerHTML = '&#9660;';
+    }
+}
+</script>
+{% endblock %}

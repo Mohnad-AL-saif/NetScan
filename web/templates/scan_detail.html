@@ -1,0 +1,596 @@
+{% extends "base.html" %}
+{% block title %}{{ scan.name }} — NetScan{% endblock %}
+
+{% block extra_css %}
+<style>
+    .fade-in { animation: fadeSlideIn 0.4s ease-out; }
+    @keyframes fadeSlideIn {
+        from { opacity: 0; transform: translateY(-8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .updated-flash { animation: flashUpdate 0.5s ease; }
+    @keyframes flashUpdate {
+        0% { background: rgba(108, 92, 231, 0.3); }
+        100% { background: transparent; }
+    }
+    .spinner { display: inline-block; animation: spin 1s linear infinite; color: var(--accent); }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+
+    .live-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+    @media (max-width: 900px) { .live-panels { grid-template-columns: 1fr; } }
+
+    .finding-card {
+        padding: 0.75rem 1rem;
+        margin: 0.5rem 0;
+        border-radius: var(--radius);
+        border-left: 4px solid;
+        background: var(--surface2);
+        animation: fadeSlideIn 0.4s ease-out;
+    }
+    .finding-card.severity-critical { border-color: var(--red); }
+    .finding-card.severity-high { border-color: var(--orange); }
+    .finding-card.severity-medium { border-color: var(--blue); }
+    .finding-card.severity-low { border-color: var(--text-dim); }
+    .finding-card.severity-info { border-color: #555; }
+    .finding-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+    .finding-meta { font-size: 0.8rem; color: var(--text-dim); }
+    .finding-detail { margin-top: 0.5rem; font-size: 0.85rem; }
+    .finding-detail summary { cursor: pointer; color: var(--accent-light); font-size: 0.8rem; }
+    .command-block {
+        display: block; padding: 0.5rem; margin: 0.25rem 0;
+        background: #0a0c10; border-radius: var(--radius-sm);
+        color: var(--green); font-family: 'SF Mono', Consolas, monospace;
+        font-size: 0.8rem; word-break: break-all; white-space: pre-wrap;
+    }
+    .output-block {
+        max-height: 150px; overflow-y: auto; padding: 0.5rem;
+        background: #0a0c10; border-radius: var(--radius-sm);
+        font-size: 0.75rem; color: var(--text-dim); white-space: pre-wrap;
+        font-family: 'SF Mono', Consolas, monospace;
+    }
+    .commands-section {
+        margin-top: 1rem; padding: 1rem;
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    }
+    .commands-section .card-header { margin-bottom: 0.5rem; }
+    .commands-section code {
+        display: block; padding: 0.35rem 0; color: var(--green);
+        font-family: 'SF Mono', Consolas, monospace; font-size: 0.85rem;
+    }
+    .phase-indicator {
+        display: flex; flex-direction: column; gap: 0.5rem;
+        padding: 1rem; background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--radius); margin-bottom: 1rem;
+    }
+    .phase-row { display: flex; align-items: center; gap: 0.75rem; font-size: 0.85rem; }
+    .phase-row .phase-icon { font-size: 1rem; width: 1.5rem; text-align: center; }
+    .phase-row .phase-name { flex: 1; }
+    .phase-row .phase-status { font-size: 0.8rem; color: var(--text-dim); }
+    .phase-row.active .phase-name { color: var(--accent-light); font-weight: 600; }
+    .phase-row.done .phase-status { color: var(--green); }
+    .panel-card {
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: var(--radius); overflow: hidden;
+    }
+    .panel-header {
+        padding: 0.75rem 1rem; background: var(--surface2);
+        border-bottom: 1px solid var(--border);
+        font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--text-dim);
+    }
+    .panel-body { padding: 0.75rem 1rem; max-height: 500px; overflow-y: auto; }
+    .badge-udp { background: rgba(108,92,231,0.15); color: var(--accent-light); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>{{ scan.name }}</h1>
+        <div class="text-dim text-sm mt-1">
+            Target: <span class="mono">{{ scan.targets }}</span> &middot; {{ scan.created_at }} &middot;
+            {% if scan.status == 'running' %}<span class="badge badge-running">Running</span>
+            {% elif scan.status == 'completed' %}<span class="badge badge-complete">Complete</span>
+            {% elif scan.status == 'stopped' %}<span class="badge badge-stopped">Stopped</span>
+            {% elif scan.status == 'failed' %}<span class="badge badge-failed">Failed</span>{% endif %}
+        </div>
+    </div>
+    <div class="btn-group">
+        {% if scan.status in ['completed', 'stopped'] %}
+        <a href="{{ url_for('findings_detail', scan_id=scan.id) }}" class="btn btn-secondary">Full Findings Report</a>
+        {% endif %}
+        {% if scan.status in ['completed', 'stopped'] %}
+        <a href="{{ url_for('scan_commands', scan_id=scan.id) }}" class="btn btn-secondary btn-sm">Commands & Upload</a>
+        <a href="{{ url_for('export_findings', scan_id=scan.id, format='csv') }}" class="btn btn-sm" style="background:var(--green, #00c853); color:#fff;">📥 تصدير Findings (CSV)</a>
+        <a href="{{ url_for('export_findings', scan_id=scan.id, format='json') }}" class="btn btn-sm" style="background:var(--accent, #6c5ce7); color:#fff;">📥 تصدير Findings (JSON)</a>
+        <form method="POST" action="{{ url_for('run_findings', scan_id=scan.id) }}" style="display:inline;">
+            <button type="submit" class="btn btn-sm" style="background:var(--orange, #ff8800); color:#fff;">🔍 فحص الثغرات</button>
+        </form>
+        {% endif %}
+        {% if scan.status in ['completed', 'failed', 'stopped'] %}
+        <form method="POST" action="{{ url_for('rescan', scan_id=scan.id) }}" style="display:inline;">
+            <button type="submit" class="btn btn-primary btn-sm">&#x1f504; Rescan</button>
+        </form>
+        {% endif %}
+        <form method="POST" action="{{ url_for('delete_scan_route', scan_id=scan.id) }}" style="display:inline;" onsubmit="return confirm('Delete this scan?');">
+            <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+        </form>
+    </div>
+</div>
+
+<details class="card" style="margin-bottom:1rem;">
+    <summary style="cursor:pointer; font-weight:600; font-size:0.9rem; padding:0.25rem 0;">Scan Configuration</summary>
+    <div style="padding:0.75rem 0 0 0;">
+        <table style="width:100%; font-size:0.875rem;">
+            <tr><td class="text-dim" style="width:180px; padding:0.3rem 0;">Target</td><td class="mono">{{ scan.targets }}</td></tr>
+            {% if scan.tcp_args %}
+            <tr><td class="text-dim" style="padding:0.3rem 0;">TCP Arguments</td><td class="mono">{{ scan.tcp_args }}</td></tr>
+            {% endif %}
+            {% if scan.udp_enabled %}
+            <tr><td class="text-dim" style="padding:0.3rem 0;">UDP Arguments</td><td class="mono">{{ scan.udp_args }}</td></tr>
+            {% endif %}
+            <tr><td class="text-dim" style="padding:0.3rem 0;">Started</td><td>{{ scan.created_at }}</td></tr>
+            <tr><td class="text-dim" style="padding:0.3rem 0;">Completed</td><td>{{ scan.completed_at or 'In Progress' }}</td></tr>
+            <tr><td class="text-dim" style="padding:0.3rem 0;">Status</td><td>
+                {% if scan.status == 'completed' %}<span class="badge badge-complete">Complete</span>
+                {% elif scan.status == 'stopped' %}<span class="badge badge-stopped">Stopped</span>
+                {% elif scan.status == 'running' %}<span class="badge badge-running">Running</span>
+                {% elif scan.status == 'failed' %}<span class="badge badge-failed">Failed</span>
+                {% endif %}
+            </td></tr>
+        </table>
+    </div>
+</details>
+
+{% if is_live %}
+<!-- === LIVE SCAN VIEW === -->
+<div style="display:flex; justify-content:flex-end; margin-bottom:0.75rem;">
+    <button onclick="stopScan()" class="btn btn-danger" id="stop-btn">&#x23f9; Stop Scan</button>
+</div>
+<div class="phase-indicator" id="phase-indicator">
+    <div class="phase-row active" id="phase-row-1">
+        <span class="phase-icon">📡</span>
+        <span class="phase-name">Phase 1: TCP Port Discovery</span>
+        <span class="phase-status" id="phase-status-1">Running...</span>
+    </div>
+    <div class="phase-row" id="phase-row-2">
+        <span class="phase-icon">🔍</span>
+        <span class="phase-name">Phase 2: TCP Version Detection</span>
+        <span class="phase-status" id="phase-status-2">Waiting</span>
+    </div>
+    <div class="phase-row" id="phase-row-3" style="display:none;">
+        <span class="phase-icon">📡</span>
+        <span class="phase-name">Phase 3: UDP Port Discovery</span>
+        <span class="phase-status" id="phase-status-3">Waiting</span>
+    </div>
+    <div class="phase-row" id="phase-row-4" style="display:none;">
+        <span class="phase-icon">🔍</span>
+        <span class="phase-name">Phase 4: UDP Version Detection</span>
+        <span class="phase-status" id="phase-status-4">Waiting</span>
+    </div>
+    <div class="phase-row" id="phase-row-version">
+        <span class="phase-icon">📦</span>
+        <span class="phase-name">Version Check: Outdated Version Detection</span>
+        <span class="phase-status" id="phase-status-version">Waiting</span>
+    </div>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Open Ports</div>
+        <div class="stat-value" id="stat-ports">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Vulnerabilities</div>
+        <div class="stat-value text-red" id="stat-vulns">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Critical</div>
+        <div class="stat-value text-red" id="stat-critical">0</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">High</div>
+        <div class="stat-value text-orange" id="stat-high">0</div>
+    </div>
+</div>
+
+<div class="live-panels">
+    <div class="panel-card">
+        <div class="panel-header">Open Services</div>
+        <div class="panel-body">
+            <table style="width:100%;">
+                <thead>
+                    <tr><th>IP</th><th>Port</th><th>Proto</th><th>Service</th><th>Banner</th></tr>
+                </thead>
+                <tbody id="ports-tbody"></tbody>
+            </table>
+            <div id="ports-empty" class="empty-state" style="padding:1.5rem;"><p>Waiting for ports...</p></div>
+        </div>
+    </div>
+    <div class="panel-card">
+        <div class="panel-header">Live Findings Feed</div>
+        <div class="panel-body" id="findings-feed">
+            <div id="findings-empty" class="empty-state" style="padding:1.5rem;"><p>Running checks...</p></div>
+        </div>
+    </div>
+</div>
+
+<div class="commands-section" id="commands-section" style="display:none;">
+    <div class="card-header">Commands Executed</div>
+    <div id="commands-list"></div>
+</div>
+
+<script>
+var scanId = {{ scan.id }};
+var lastPortCount = 0;
+var lastFindingCount = 0;
+var pollTimer = null;
+
+function startLivePolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    fetchLiveData();
+    pollTimer = setInterval(fetchLiveData, 2000);
+}
+
+function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+window.addEventListener('beforeunload', stopPolling);
+
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        stopPolling();
+    } else if (!pollTimer && !window._scanDone) {
+        startLivePolling();
+    }
+});
+
+function fetchLiveData() {
+    fetch('/api/scan/' + scanId + '/live')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'done' || data.status === 'stopped' || data.from_db) {
+                stopPolling();
+                if (!window._scanDone) {
+                    window._scanDone = true;
+                    setTimeout(function() { location.reload(); }, 1500);
+                }
+                return;
+            }
+            if (data.error) {
+                stopPolling();
+                window._scanDone = true;
+                return;
+            }
+
+            if (data.udp_enabled) {
+                document.getElementById('phase-row-3').style.display = 'flex';
+                document.getElementById('phase-row-4').style.display = 'flex';
+            }
+
+            updatePhases(data);
+            updateStats(data);
+
+            if (data.ports.length > lastPortCount) {
+                document.getElementById('ports-empty').style.display = 'none';
+                for (var i = lastPortCount; i < data.ports.length; i++) {
+                    addPortRow(data.ports[i]);
+                }
+                lastPortCount = data.ports.length;
+            }
+
+            data.ports.forEach(function(p) {
+                if (p.phase >= 2) updatePortRow(p);
+            });
+
+            if (data.findings.length > lastFindingCount) {
+                document.getElementById('findings-empty').style.display = 'none';
+                for (var i = lastFindingCount; i < data.findings.length; i++) {
+                    addFindingCard(data.findings[i]);
+                }
+                lastFindingCount = data.findings.length;
+            }
+
+            if (data.cmds.length > 0) {
+                document.getElementById('commands-section').style.display = 'block';
+                var html = '';
+                data.cmds.forEach(function(c) { html += '<code>$ ' + escapeHtml(c) + '</code>'; });
+                document.getElementById('commands-list').innerHTML = html;
+            }
+        })
+        .catch(function() {
+            stopPolling();
+        });
+}
+
+function updatePhases(data) {
+    var phase = data.phase;
+    var status = data.status;
+    for (var i = 1; i <= 4; i++) {
+        var row = document.getElementById('phase-row-' + i);
+        var st = document.getElementById('phase-status-' + i);
+        if (!row) continue;
+        row.classList.remove('active', 'done');
+        if (i < phase) {
+            row.classList.add('done');
+            st.textContent = 'Done';
+        } else if (i === phase) {
+            row.classList.add('active');
+            st.textContent = status === 'finishing' ? 'Finishing...' : 'Running...';
+        } else {
+            st.textContent = 'Waiting';
+        }
+    }
+
+    var versionRow = document.getElementById('phase-row-version');
+    var versionSt = document.getElementById('phase-status-version');
+    versionRow.classList.remove('active', 'done');
+    if (status === 'version_check') {
+        for (var i = 1; i <= phase; i++) {
+            var r = document.getElementById('phase-row-' + i);
+            var s = document.getElementById('phase-status-' + i);
+            if (r) { r.classList.add('done'); r.classList.remove('active'); s.textContent = 'Done'; }
+        }
+        versionRow.classList.add('active');
+        versionSt.textContent = 'Running...';
+    } else if (status === 'finishing' || status === 'done') {
+        versionRow.classList.add('done');
+        versionSt.textContent = 'Done';
+        for (var i = 1; i <= phase; i++) {
+            var r = document.getElementById('phase-row-' + i);
+            var s = document.getElementById('phase-status-' + i);
+            if (r) { r.classList.add('done'); r.classList.remove('active'); s.textContent = 'Done'; }
+        }
+    }
+}
+
+function updateStats(data) {
+    document.getElementById('stat-ports').textContent = data.port_count;
+    document.getElementById('stat-vulns').textContent = data.vuln_count;
+    document.getElementById('stat-critical').textContent = data.stats.critical;
+    document.getElementById('stat-high').textContent = data.stats.high;
+}
+
+function addPortRow(port) {
+    var tbody = document.getElementById('ports-tbody');
+    var row = document.createElement('tr');
+    row.id = 'port-' + port.protocol + '-' + port.port;
+    row.className = 'fade-in';
+    var protoBadge = port.protocol === 'udp'
+        ? '<span class="badge badge-udp">udp</span>'
+        : '<span class="text-dim">tcp</span>';
+    row.innerHTML =
+        '<td class="mono">' + escapeHtml(port.ip) + '</td>' +
+        '<td class="mono"><strong>' + port.port + '</strong></td>' +
+        '<td>' + protoBadge + '</td>' +
+        '<td>' + escapeHtml(port.service || '—') + '</td>' +
+        '<td class="text-dim truncate banner-cell">' +
+            (port.banner || (port.phase <= 2 ? '<span class="spinner">⟳</span>' : '—')) +
+        '</td>';
+    tbody.appendChild(row);
+}
+
+function updatePortRow(port) {
+    var row = document.getElementById('port-' + port.protocol + '-' + port.port);
+    if (row) {
+        var cells = row.querySelectorAll('td');
+        cells[3].textContent = port.service || '—';
+        if (port.banner) {
+            cells[4].innerHTML = escapeHtml(port.banner);
+            cells[4].classList.add('updated-flash');
+        }
+    }
+}
+
+function addFindingCard(finding) {
+    var feed = document.getElementById('findings-feed');
+    var card = document.createElement('div');
+    var sev = finding.severity.toLowerCase();
+    card.className = 'finding-card severity-' + sev;
+    card.innerHTML =
+        '<div class="finding-header">' +
+            '<span class="badge badge-' + sev + '">' + escapeHtml(finding.severity) + '</span>' +
+            '<strong>' + escapeHtml(finding.finding_name) + '</strong>' +
+        '</div>' +
+        '<div class="finding-meta">' +
+            'Port ' + finding.port + ' | ' + escapeHtml(finding.category) +
+            (finding.cve ? ' | ' + escapeHtml(finding.cve) : '') +
+            (finding.cvss ? ' | CVSS ' + finding.cvss : '') +
+        '</div>' +
+        '<details class="finding-detail">' +
+            '<summary>Command & Output</summary>' +
+            '<code class="command-block">' + escapeHtml(finding.command || '') + '</code>' +
+            '<pre class="output-block">' + escapeHtml(finding.detail || '') + '</pre>' +
+        '</details>';
+    feed.prepend(card);
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(text));
+    return div.innerHTML;
+}
+
+function stopScan() {
+    if (!confirm('Stop this scan? Results found so far will be kept.')) return;
+    fetch('/api/scan/' + scanId + '/stop', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('stop-btn').textContent = 'Stopping...';
+            document.getElementById('stop-btn').disabled = true;
+        });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    startLivePolling();
+});
+</script>
+
+{% else %}
+<!-- === COMPLETED SCAN VIEW === -->
+
+{% if scan.nmap_command %}
+<div class="commands-section">
+    <div class="card-header">Commands Executed</div>
+    {% for cmd_line in scan.nmap_command.split('\n') %}
+    {% if cmd_line.strip() %}
+    <code style="display:block;padding:0.35rem 0;color:var(--green);font-family:'SF Mono',Consolas,monospace;font-size:0.85rem;">$ {{ cmd_line }}</code>
+    {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if scan.status in ['completed', 'stopped'] or results|length > 0 %}
+<div class="stats-grid" style="margin-top:1rem;">
+    <div class="stat-card">
+        <div class="stat-label">Open Services</div>
+        <div class="stat-value">{{ results|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Critical</div>
+        <div class="stat-value text-red">{{ finding_stats.critical }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">High</div>
+        <div class="stat-value text-orange">{{ finding_stats.high }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Medium</div>
+        <div class="stat-value text-blue">{{ finding_stats.medium }}</div>
+    </div>
+</div>
+
+<div style="display:flex; gap:8px; margin:1rem 0; flex-wrap:wrap;">
+    <form method="POST" action="{{ url_for('run_findings', scan_id=scan.id) }}" style="display:inline;">
+        <button type="submit" class="btn" style="background:var(--orange, #ff8800); color:#fff; padding:8px 16px; border-radius:6px; border:none; cursor:pointer;">
+            🔍 فحص الثغرات تلقائياً
+        </button>
+    </form>
+    <a href="{{ url_for('scan_commands', scan_id=scan.id) }}"
+       class="btn" style="background:var(--accent, #6c5ce7); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
+        🔧 الأوامر والأدوات
+    </a>
+    <a href="{{ url_for('export_findings', scan_id=scan.id, format='csv') }}"
+       class="btn" style="background:var(--green, #00c853); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
+        📥 تصدير Findings (CSV)
+    </a>
+    <a href="{{ url_for('export_findings', scan_id=scan.id, format='json') }}"
+       class="btn" style="background:var(--green, #00c853); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
+        📥 تصدير Findings (JSON)
+    </a>
+</div>
+
+<div class="tabs">
+    <button class="tab-btn {% if tab == 'services' %}active{% endif %}" onclick="switchTab('services', this)">Open Services</button>
+    <button class="tab-btn {% if tab == 'findings' %}active{% endif %}" onclick="switchTab('findings', this)">Findings ({{ finding_stats.total }})</button>
+</div>
+
+<div id="tab-services" class="tab-content {% if tab == 'services' %}active{% endif %}">
+    {% if results %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr><th>IP Address</th><th>Port</th><th>Protocol</th><th>Service</th><th>Banner</th></tr>
+            </thead>
+            <tbody>
+                {% for r in results %}
+                <tr>
+                    <td class="mono">{{ r.ip }}</td>
+                    <td class="mono">{{ r.port }}</td>
+                    <td>{% if r.protocol == 'udp' %}<span class="badge badge-udp">udp</span>{% else %}{{ r.protocol }}{% endif %}</td>
+                    <td>{{ r.service }}</td>
+                    <td class="text-dim truncate">{{ r.banner or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No open services found.</p></div>
+    {% endif %}
+</div>
+
+<div id="tab-findings" class="tab-content {% if tab == 'findings' %}active{% endif %}">
+    {% if findings %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:30px;"></th>
+                    <th>Severity</th><th>Finding</th><th>IP</th><th>Port</th><th>CVE</th><th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for f in findings %}
+                <tr class="expand-toggle" onclick="toggleDetail({{ loop.index }})">
+                    <td class="text-dim" id="arrow-{{ loop.index }}">&#9654;</td>
+                    <td>
+                        {% if f.severity == 'Critical' %}<span class="badge badge-critical">Critical</span>
+                        {% elif f.severity == 'High' %}<span class="badge badge-high">High</span>
+                        {% elif f.severity == 'Medium' %}<span class="badge badge-medium">Medium</span>
+                        {% elif f.severity == 'Low' %}<span class="badge badge-low">Low</span>
+                        {% else %}<span class="badge badge-info">Info</span>{% endif %}
+                    </td>
+                    <td>{{ f.finding_name }}</td>
+                    <td>
+                        {% set ip_list = f.ip.split(', ') %}
+                        {% if ip_list|length > 1 %}
+                        <span class="badge" style="background:var(--orange, #ff8800); color:#fff; padding:2px 8px; border-radius:4px; cursor:help;"
+                              title="{{ f.ip }}">
+                            {{ ip_list|length }} IPs
+                        </span>
+                        {% else %}
+                        <code style="font-size:0.8rem;">{{ f.ip }}</code>
+                        {% endif %}
+                    </td>
+                    <td class="mono">{{ f.port }}</td>
+                    <td class="mono text-dim">{{ f.cve or '—' }}</td>
+                    <td><span class="badge badge-vuln">Vulnerable</span></td>
+                </tr>
+                <tr class="expandable-detail" id="detail-{{ loop.index }}">
+                    <td colspan="7">
+                        {% if f.command %}
+                        <div class="text-dim text-sm mb-1">Command:</div>
+                        <div class="detail-output mb-1">{{ f.command }}</div>
+                        {% endif %}
+                        <div class="text-dim text-sm mb-1">Output:</div>
+                        <div class="detail-output">{{ f.detail or 'No output captured.' }}</div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p>No vulnerabilities found.</p></div>
+    {% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if not is_live %}
+<script>
+function switchTab(name, btn) {
+    document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
+    document.querySelectorAll('.tab-content').forEach(function(c){ c.classList.remove('active'); });
+    document.getElementById('tab-' + name).classList.add('active');
+    btn.classList.add('active');
+}
+function toggleDetail(idx) {
+    var row = document.getElementById('detail-' + idx);
+    var arrow = document.getElementById('arrow-' + idx);
+    if (row.style.display === 'table-row') {
+        row.style.display = 'none';
+        arrow.innerHTML = '&#9654;';
+    } else {
+        row.style.display = 'table-row';
+        arrow.innerHTML = '&#9660;';
+    }
+}
+</script>
+{% endif %}
+{% endblock %}
