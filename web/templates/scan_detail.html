@@ -484,6 +484,10 @@ document.addEventListener('DOMContentLoaded', function() {
        class="btn" style="background:var(--blue, #0088ff); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
         💾 تصدير كامل (JSON)
     </a>
+    <a href="{{ url_for('export_raw_xml', scan_id=scan.id) }}"
+       class="btn" style="background:var(--bg-dim, #1a1d27); color:var(--text, #e0e0e0); padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center; border:1px solid var(--border, #333);">
+        📥 Raw XML Output
+    </a>
 </div>
 
 <div class="tabs">
@@ -529,6 +533,24 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <div id="tab-findings" class="tab-content {% if tab == 'findings' %}active{% endif %}">
     {% if findings %}
+    <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+        <button class="filter-btn active" onclick="filterFindings('all', this)"
+                style="padding:6px 16px; border-radius:6px; border:1px solid var(--border, #333); background:var(--accent, #6c5ce7); color:#fff; cursor:pointer; font-size:13px;">
+            الكل ({{ filter_counts.all }})
+        </button>
+        <button class="filter-btn" onclick="filterFindings('vulnerable', this)"
+                style="padding:6px 16px; border-radius:6px; border:1px solid var(--border, #333); background:var(--bg-dim, #1a1d27); color:var(--text, #e0e0e0); cursor:pointer; font-size:13px;">
+            Vulnerable ({{ filter_counts.vulnerable }})
+        </button>
+        <button class="filter-btn" onclick="filterFindings('safe', this)"
+                style="padding:6px 16px; border-radius:6px; border:1px solid var(--border, #333); background:var(--bg-dim, #1a1d27); color:var(--text, #e0e0e0); cursor:pointer; font-size:13px;">
+            Safe ({{ filter_counts.safe }})
+        </button>
+        <button class="filter-btn" onclick="filterFindings('error', this)"
+                style="padding:6px 16px; border-radius:6px; border:1px solid var(--border, #333); background:var(--bg-dim, #1a1d27); color:var(--text, #e0e0e0); cursor:pointer; font-size:13px;">
+            False/Error ({{ filter_counts.error }})
+        </button>
+    </div>
     <div class="table-wrap">
         <table>
             <thead>
@@ -539,7 +561,7 @@ document.addEventListener('DOMContentLoaded', function() {
             </thead>
             <tbody>
                 {% for f in findings %}
-                <tr class="expand-toggle" onclick="toggleDetail({{ loop.index }})">
+                <tr class="expand-toggle finding-row" data-status="{{ f.status or 'unknown' }}" onclick="toggleDetail({{ loop.index }})">
                     <td class="text-dim" id="arrow-{{ loop.index }}">&#9654;</td>
                     <td>
                         {% if f.severity == 'Critical' %}<span class="badge badge-critical">Critical</span>
@@ -562,9 +584,19 @@ document.addEventListener('DOMContentLoaded', function() {
                     </td>
                     <td class="mono">{{ f.port }}</td>
                     <td class="mono text-dim">{{ f.cve or '—' }}</td>
-                    <td><span class="badge badge-vuln">Vulnerable</span></td>
+                    <td>
+                        {% if f.status == 'vulnerable' %}
+                        <span class="badge" style="background:#ff4444; color:#fff; padding:2px 8px; border-radius:4px;">Vulnerable</span>
+                        {% elif f.status == 'safe' %}
+                        <span class="badge" style="background:#4caf50; color:#fff; padding:2px 8px; border-radius:4px;">Safe</span>
+                        {% elif f.status == 'error' %}
+                        <span class="badge" style="background:#ff8800; color:#fff; padding:2px 8px; border-radius:4px;">False/Error</span>
+                        {% else %}
+                        <span class="badge" style="background:#555; color:#fff; padding:2px 8px; border-radius:4px;">Unknown</span>
+                        {% endif %}
+                    </td>
                 </tr>
-                <tr class="expandable-detail" id="detail-{{ loop.index }}">
+                <tr class="expandable-detail" id="detail-{{ loop.index }}" data-parent-status="{{ f.status or 'unknown' }}">
                     <td colspan="7">
                         {% if f.command %}
                         <div class="text-dim text-sm mb-1">Command:</div>
@@ -579,7 +611,7 @@ document.addEventListener('DOMContentLoaded', function() {
         </table>
     </div>
     {% else %}
-    <div class="empty-state"><p>No vulnerabilities found.</p></div>
+    <div class="empty-state"><p>No findings found.</p></div>
     {% endif %}
 </div>
 {% endif %}
@@ -605,6 +637,29 @@ function toggleDetail(idx) {
         row.style.display = 'table-row';
         arrow.innerHTML = '&#9660;';
     }
+}
+function filterFindings(type, btn) {
+    document.querySelectorAll('.filter-btn').forEach(function(b) {
+        b.style.background = 'var(--bg-dim, #1a1d27)';
+        b.style.color = 'var(--text, #e0e0e0)';
+        b.classList.remove('active');
+    });
+    btn.style.background = 'var(--accent, #6c5ce7)';
+    btn.style.color = '#fff';
+    btn.classList.add('active');
+
+    document.querySelectorAll('.finding-row').forEach(function(row) {
+        var status = row.dataset.status;
+        var detailId = row.querySelector('[id^="arrow-"]');
+        var idx = detailId ? detailId.id.replace('arrow-', '') : null;
+        var detailRow = idx ? document.getElementById('detail-' + idx) : null;
+        var show = (type === 'all') || (status === type);
+        row.style.display = show ? '' : 'none';
+        if (detailRow && !show) {
+            detailRow.style.display = 'none';
+            if (detailId) detailId.innerHTML = '&#9654;';
+        }
+    });
 }
 </script>
 {% endif %}

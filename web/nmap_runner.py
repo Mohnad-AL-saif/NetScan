@@ -252,7 +252,7 @@ def run_phase1_streaming(target, tcp_args, callback=None, controller=None):
 def run_phase2(target, ports_list, controller=None):
     """Phase 2: TCP version detection on discovered ports."""
     if not ports_list:
-        return [], ''
+        return [], '', ''
 
     if 22 in ports_list:
         _keyscan_targets(target)
@@ -282,7 +282,7 @@ def run_phase2(target, ports_list, controller=None):
         with open(os.path.join(output_dir, f'scan_{safe_target}_{timestamp}_stderr.txt'), 'w') as f:
             f.write(stderr)
 
-    return parse_nmap_xml(stdout, target), cmd
+    return parse_nmap_xml(stdout, target), cmd, stdout
 
 
 def run_udp_phase1(target, udp_args, controller=None):
@@ -332,7 +332,7 @@ def run_udp_phase1(target, udp_args, controller=None):
 def run_udp_phase2(target, udp_ports, controller=None):
     """Phase 4: UDP version detection."""
     if not udp_ports:
-        return [], ''
+        return [], '', ''
 
     ports_csv = ','.join(str(p) for p in udp_ports)
     cmd = f'sudo nmap -sUV -p{ports_csv} --min-rate 3000 -n -Pn -oX - {target}'
@@ -345,7 +345,7 @@ def run_udp_phase2(target, udp_ports, controller=None):
         controller.register_nmap(proc.pid)
 
     stdout, stderr = proc.communicate(input='yes\n' * 20, timeout=600)
-    return parse_nmap_xml(stdout, target, default_protocol='udp'), cmd
+    return parse_nmap_xml(stdout, target, default_protocol='udp'), cmd, stdout
 
 
 def run_service_scripts(target, services_found):
@@ -380,6 +380,7 @@ def run_service_scripts(target, services_found):
 
     all_script_results = {}
     all_commands_run = []
+    raw_outputs = {}
 
     for stype, ports in service_groups.items():
         scripts = SERVICE_SCRIPTS[stype]['scripts']
@@ -396,6 +397,7 @@ def run_service_scripts(target, services_found):
             stdout, stderr = proc.communicate(input='yes\n' * 10, timeout=300)
             script_results = parse_script_xml(stdout)
             all_script_results.update(script_results)
+            raw_outputs[stype] = stdout
         except subprocess.TimeoutExpired:
             proc.kill()
         except Exception:
@@ -417,7 +419,7 @@ def run_service_scripts(target, services_found):
     except Exception:
         pass
 
-    return all_script_results
+    return all_script_results, raw_outputs
 
 
 def parse_script_xml(xml_str):

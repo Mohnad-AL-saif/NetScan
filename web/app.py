@@ -21,6 +21,7 @@ from command_generator import generate_commands_for_scan, analyze_command_output
 
 app = Flask(__name__)
 app.secret_key = 'netscan-dev-secret-key-change-in-production'
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 
 live_scans = {}
 
@@ -31,6 +32,64 @@ try:
     _conn.close()
 except Exception:
     pass
+
+try:
+    _conn = models.get_db()
+    _conn.execute('ALTER TABLE finding_results ADD COLUMN status TEXT DEFAULT "unknown"')
+    _conn.commit()
+    _conn.close()
+except Exception:
+    pass
+
+try:
+    _conn = models.get_db()
+    _conn.execute('''CREATE TABLE IF NOT EXISTS scan_raw_output (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_id INTEGER NOT NULL,
+        phase TEXT NOT NULL,
+        output_type TEXT DEFAULT 'xml',
+        output TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (scan_id) REFERENCES scans(id) ON DELETE CASCADE
+    )''')
+    _conn.commit()
+    _conn.close()
+except Exception:
+    pass
+
+
+def classify_finding(vulnerable, detail, command):
+    """Classify finding as 'vulnerable', 'safe', or 'error'."""
+    detail_lower = (detail or '').lower()
+    cmd = command or ''
+
+    not_a_command = (
+        cmd.startswith('Check ') or cmd.startswith('Send ') or
+        cmd.startswith('Related') or cmd.startswith('~/') or
+        cmd.startswith('Mount ') or cmd.startswith('OpenSSH ') or
+        cmd.startswith('See ') or cmd.startswith('Look ') or
+        cmd.startswith('Note') or cmd == 'SSH_AUTH_SOCK'
+    )
+
+    has_error = (
+        '/bin/sh:' in detail_lower or
+        'syntax error' in detail_lower or
+        'file for logins not found' in detail_lower or
+        'no such file' in detail_lower or
+        detail_lower.strip() == 'timeout' or
+        'not allowed' in detail_lower
+    )
+
+    if not_a_command or has_error:
+        return 'error'
+    elif vulnerable:
+        false_indicators = ['not found', 'access denied', 'permission denied',
+                            'connection refused', '404', 'timeout']
+        if any(ind in detail_lower for ind in false_indicators):
+            return 'error'
+        return 'vulnerable'
+    else:
+        return 'safe'
 
 
 class ScanController:
@@ -264,10 +323,20 @@ def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
         live_scans[scan_id]['phase_label'] = 'TCP Version Detection'
 
         port_numbers = [p['port'] for p in tcp_ports]
-        phase2_results, cmd2 = nmap_runner.run_phase2(targets, port_numbers, controller=controller)
+        phase2_results, cmd2, phase2_xml = nmap_runner.run_phase2(targets, port_numbers, controller=controller)
         if cmd2:
             with lock:
                 live_scans[scan_id]['cmds'].append(cmd2)
+
+        if phase2_xml:
+            try:
+                _db = models.get_db()
+                _db.execute('INSERT INTO scan_raw_output (scan_id, phase, output_type, output) VALUES (?,?,?,?)',
+                            (scan_id, 'phase2_tcp_version', 'xml', phase2_xml))
+                _db.commit()
+                _db.close()
+            except Exception:
+                pass
 
         for p2 in phase2_results:
             with lock:
@@ -288,7 +357,16 @@ def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
             live_scans[scan_id]['phase_label'] = 'Running targeted scripts'
             try:
                 svc_list = [dict(r) if hasattr(r, 'keys') else r for r in phase2_results]
-                script_results = nmap_runner.run_service_scripts(targets, svc_list)
+                script_results, script_raw = nmap_runner.run_service_scripts(targets, svc_list)
+                for stype, raw_xml in script_raw.items():
+                    try:
+                        _db = models.get_db()
+                        _db.execute('INSERT INTO scan_raw_output (scan_id, phase, output_type, output) VALUES (?,?,?,?)',
+                                    (scan_id, f'phase2.5_{stype}', 'xml', raw_xml))
+                        _db.commit()
+                        _db.close()
+                    except Exception:
+                        pass
                 if script_results:
                     conn = models.get_db()
                     for key, output in script_results.items():
@@ -341,10 +419,20 @@ def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
             live_scans[scan_id]['phase_label'] = 'UDP Version Detection'
 
             udp_port_numbers = [p['port'] for p in udp_ports_data]
-            udp_phase2_results, cmd4 = nmap_runner.run_udp_phase2(targets, udp_port_numbers, controller=controller)
+            udp_phase2_results, cmd4, udp_xml = nmap_runner.run_udp_phase2(targets, udp_port_numbers, controller=controller)
             if cmd4:
                 with lock:
                     live_scans[scan_id]['cmds'].append(cmd4)
+
+            if udp_xml:
+                try:
+                    _db = models.get_db()
+                    _db.execute('INSERT INTO scan_raw_output (scan_id, phase, output_type, output) VALUES (?,?,?,?)',
+                                (scan_id, 'phase4_udp_version', 'xml', udp_xml))
+                    _db.commit()
+                    _db.close()
+                except Exception:
+                    pass
 
             for p2 in udp_phase2_results:
                 with lock:
@@ -504,15 +592,27 @@ def scan_detail(scan_id):
         return redirect(url_for('dashboard'))
 
     results = models.get_scan_results(scan_id)
-    findings = models.get_finding_results(scan_id, vulnerable_only=True)
+    all_findings = models.get_finding_results(scan_id, vulnerable_only=False)
+    for f in all_findings:
+        if not f.get('status') or f['status'] == 'unknown':
+            f['status'] = classify_finding(f.get('vulnerable'), f.get('detail'), f.get('command'))
+    findings = [f for f in all_findings if f['status'] == 'vulnerable']
     finding_stats = models.get_finding_stats(scan_id)
     tab = request.args.get('tab', 'services')
+
+    filter_counts = {
+        'all': len(all_findings),
+        'vulnerable': sum(1 for f in all_findings if f['status'] == 'vulnerable'),
+        'safe': sum(1 for f in all_findings if f['status'] == 'safe'),
+        'error': sum(1 for f in all_findings if f['status'] == 'error'),
+    }
 
     is_live = scan_id in live_scans and live_scans[scan_id]['status'] not in ('done', 'error', 'stopped')
 
     return render_template('scan_detail.html',
-                           scan=scan, results=results, findings=findings,
-                           finding_stats=finding_stats, tab=tab, is_live=is_live)
+                           scan=scan, results=results, findings=all_findings,
+                           finding_stats=finding_stats, tab=tab, is_live=is_live,
+                           filter_counts=filter_counts)
 
 
 @app.route('/scan/<int:scan_id>/findings')
@@ -618,6 +718,34 @@ def export_raw_scan(scan_id):
         json.dumps(data, indent=2, ensure_ascii=False, default=str),
         mimetype='application/json',
         headers={'Content-Disposition': f'attachment; filename=scan_{scan_id}_full_export.json'}
+    )
+
+
+@app.route('/scan/<int:scan_id>/export-raw-xml')
+@login_required
+def export_raw_xml(scan_id):
+    import zipfile
+    conn = models.get_db()
+    rows = conn.execute(
+        'SELECT phase, output_type, output, created_at FROM scan_raw_output WHERE scan_id=? ORDER BY id',
+        (scan_id,)
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        flash('No raw output saved for this scan.', 'error')
+        return redirect(url_for('scan_detail', scan_id=scan_id))
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for row in rows:
+            filename = f"{row['phase']}.{row['output_type']}"
+            zf.writestr(filename, row['output'])
+    buffer.seek(0)
+    return Response(
+        buffer.getvalue(),
+        mimetype='application/zip',
+        headers={'Content-Disposition': f'attachment; filename=scan_{scan_id}_raw_output.zip'}
     )
 
 
