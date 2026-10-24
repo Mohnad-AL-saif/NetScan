@@ -92,7 +92,7 @@ def run_phase2(target, ports_list, controller=None):
         _keyscan_targets(target)
 
     ports_csv = ','.join(str(p) for p in ports_list)
-    cmd = f'sudo nmap -p{ports_csv} -sV --script "default and not (ssh-* or auth-* or brute or *login*)" --script-args ssh.timeout=5,userdb=/dev/null,passdb=/dev/null --min-rate 5000 -n -Pn -oX - {target}'
+    cmd = f'sudo nmap -p{ports_csv} -sV --min-rate 5000 -n -Pn -oX - {target}'
 
     proc = subprocess.Popen(
         cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
