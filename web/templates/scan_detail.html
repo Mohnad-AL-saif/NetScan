@@ -480,6 +480,10 @@ document.addEventListener('DOMContentLoaded', function() {
        class="btn" style="background:var(--green, #00c853); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
         📥 تصدير Findings (JSON)
     </a>
+    <a href="{{ url_for('export_raw_scan', scan_id=scan.id) }}"
+       class="btn" style="background:var(--blue, #0088ff); color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center;">
+        💾 تصدير كامل (JSON)
+    </a>
 </div>
 
 <div class="tabs">

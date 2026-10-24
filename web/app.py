@@ -510,6 +510,44 @@ def export_findings(scan_id):
         )
 
 
+@app.route('/scan/<int:scan_id>/export-raw')
+@login_required
+def export_raw_scan(scan_id):
+    conn = models.get_db()
+    scan = conn.execute('SELECT * FROM scans WHERE id=?', (scan_id,)).fetchone()
+    if not scan:
+        conn.close()
+        return 'Not found', 404
+
+    results = conn.execute('SELECT * FROM scan_results WHERE scan_id=?', (scan_id,)).fetchall()
+    findings = conn.execute('SELECT * FROM finding_results WHERE scan_id=?', (scan_id,)).fetchall()
+    conn.close()
+
+    data = {
+        'scan': {
+            'id': scan['id'],
+            'name': scan['name'],
+            'targets': scan['targets'],
+            'created_at': scan['created_at'],
+            'status': scan['status'],
+        },
+        'results': [dict(r) for r in results],
+        'findings': [dict(f) for f in findings],
+        'stats': {
+            'total_services': len(results),
+            'total_findings': len(findings),
+            'unique_ips': len(set(r['ip'] for r in results)),
+            'unique_ports': len(set(r['port'] for r in results)),
+        }
+    }
+
+    return Response(
+        json.dumps(data, indent=2, ensure_ascii=False, default=str),
+        mimetype='application/json',
+        headers={'Content-Disposition': f'attachment; filename=scan_{scan_id}_full_export.json'}
+    )
+
+
 @app.route('/scan/<int:scan_id>/run-findings', methods=['POST'])
 @login_required
 def run_findings(scan_id):

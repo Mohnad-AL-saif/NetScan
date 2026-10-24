@@ -102,6 +102,20 @@ def run_phase2(target, ports_list, controller=None):
         controller.register_nmap(proc.pid)
 
     stdout, stderr = proc.communicate(input='yes\n' * 20, timeout=600)
+
+    import datetime
+    output_dir = os.path.join(os.path.dirname(__file__), '..', 'scan_outputs')
+    os.makedirs(output_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    safe_target = target.replace(' ', '_').replace(',', '_').replace('/', '-')[:50]
+
+    with open(os.path.join(output_dir, f'scan_{safe_target}_{timestamp}.xml'), 'w') as f:
+        f.write(stdout)
+
+    if stderr.strip():
+        with open(os.path.join(output_dir, f'scan_{safe_target}_{timestamp}_stderr.txt'), 'w') as f:
+            f.write(stderr)
+
     return parse_nmap_xml(stdout, target), cmd
 
 
