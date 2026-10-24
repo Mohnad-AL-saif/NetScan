@@ -496,7 +496,7 @@ document.addEventListener('DOMContentLoaded', function() {
     <div class="table-wrap">
         <table>
             <thead>
-                <tr><th>IP Address</th><th>Port</th><th>Protocol</th><th>Service</th><th>Banner</th></tr>
+                <tr><th>IP Address</th><th>Port</th><th>Protocol</th><th>Service</th><th>Banner</th><th>Scripts</th></tr>
             </thead>
             <tbody>
                 {% for r in results %}
@@ -506,6 +506,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     <td>{% if r.protocol == 'udp' %}<span class="badge badge-udp">udp</span>{% else %}{{ r.protocol }}{% endif %}</td>
                     <td>{{ r.service }}</td>
                     <td class="text-dim truncate">{{ r.banner or '—' }}</td>
+                    <td>
+                        {% if r.scripts %}
+                        <button onclick="var p=this.nextElementSibling; p.style.display = p.style.display==='none'?'block':'none';"
+                                style="background:var(--accent, #6c5ce7); color:#fff; border:none; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:12px;">
+                            Scripts
+                        </button>
+                        <pre style="display:none; background:var(--bg-dim, #1a1d27); padding:10px; border-radius:6px; margin-top:6px; font-size:12px; white-space:pre-wrap; max-height:300px; overflow-y:auto;">{{ r.scripts }}</pre>
+                        {% else %}
+                        <span style="color:#666;">—</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

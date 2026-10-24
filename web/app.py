@@ -24,6 +24,14 @@ app.secret_key = 'netscan-dev-secret-key-change-in-production'
 
 live_scans = {}
 
+try:
+    _conn = models.get_db()
+    _conn.execute('ALTER TABLE scan_results ADD COLUMN scripts TEXT DEFAULT ""')
+    _conn.commit()
+    _conn.close()
+except Exception:
+    pass
+
 
 class ScanController:
     def __init__(self, scan_id):
@@ -274,6 +282,44 @@ def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
         if controller.should_stop():
             raise Exception('Scan stopped by user')
 
+        # === PHASE 2.5: Targeted NSE Scripts ===
+        if phase2_results:
+            live_scans[scan_id]['status'] = 'scripts'
+            live_scans[scan_id]['phase_label'] = 'Running targeted scripts'
+            try:
+                svc_list = [dict(r) if hasattr(r, 'keys') else r for r in phase2_results]
+                script_results = nmap_runner.run_service_scripts(targets, svc_list)
+                if script_results:
+                    conn = models.get_db()
+                    for key, output in script_results.items():
+                        parts = key.split('/')
+                        if len(parts) >= 2:
+                            ip_port = parts[0]
+                            script_name = parts[1]
+                            if ':' in ip_port:
+                                ip, port_str = ip_port.rsplit(':', 1)
+                                try:
+                                    existing = conn.execute(
+                                        'SELECT scripts FROM scan_results WHERE scan_id=? AND ip=? AND port=?',
+                                        (scan_id, ip, int(port_str))
+                                    ).fetchone()
+                                    if existing:
+                                        current_scripts = existing['scripts'] or ''
+                                        new_scripts = current_scripts + f'\n[{script_name}] {output}'
+                                        conn.execute(
+                                            'UPDATE scan_results SET scripts=? WHERE scan_id=? AND ip=? AND port=?',
+                                            (new_scripts.strip(), scan_id, ip, int(port_str))
+                                        )
+                                except Exception:
+                                    pass
+                    conn.commit()
+                    conn.close()
+            except Exception as e:
+                print(f"Script scan error: {e}")
+
+        if controller.should_stop():
+            raise Exception('Scan stopped by user')
+
         # === PHASE 3 & 4: UDP (if enabled) ===
         if udp_scan and udp_args:
             live_scans[scan_id]['status'] = 'phase3'
@@ -438,7 +484,7 @@ def stop_scan(scan_id):
 def scan_progress_api(scan_id):
     data = live_scans.get(scan_id)
     if data:
-        pct_map = {'phase1': 20, 'phase2': 50, 'phase3': 65, 'phase4': 80, 'version_check': 85, 'finishing': 90, 'done': 100, 'stopped': 100, 'error': 100}
+        pct_map = {'phase1': 20, 'phase2': 45, 'scripts': 55, 'phase3': 65, 'phase4': 80, 'version_check': 85, 'finishing': 90, 'done': 100, 'stopped': 100, 'error': 100}
         return jsonify({
             'phase': data['phase_label'],
             'percent': pct_map.get(data['status'], 0)
@@ -761,6 +807,74 @@ def run_findings(scan_id):
             grouped[rule_name]['ports'].add(port)
             if detail not in grouped[rule_name]['details']:
                 grouped[rule_name]['details'].append(detail)
+
+    SCRIPT_FINDINGS = [
+        ('ssl-heartbleed', 'VULNERABLE', 'Heartbleed Vulnerability (CVE-2014-0160)', 'Critical', 9.8, 'ssl_vuln'),
+        ('ssl-poodle', 'VULNERABLE', 'POODLE Vulnerability (CVE-2014-3566)', 'High', 7.5, 'ssl_vuln'),
+        ('ssl-ccs-injection', 'VULNERABLE', 'CCS Injection (CVE-2014-0224)', 'High', 7.4, 'ssl_vuln'),
+        ('smb-vuln-ms17-010', 'VULNERABLE', 'EternalBlue (MS17-010)', 'Critical', 9.8, 'smb_vuln'),
+        ('smb-vuln-ms08-067', 'VULNERABLE', 'MS08-067 (Conficker)', 'Critical', 9.8, 'smb_vuln'),
+        ('smb-double-pulsar-backdoor', 'VULNERABLE', 'DoublePulsar Backdoor', 'Critical', 10.0, 'smb_vuln'),
+        ('ftp-anon', 'Anonymous FTP login allowed', 'Anonymous FTP Login Allowed', 'High', 7.5, 'ftp_vuln'),
+        ('ftp-vsftpd-backdoor', 'VULNERABLE', 'vsftpd 2.3.4 Backdoor', 'Critical', 9.8, 'ftp_vuln'),
+        ('ftp-proftpd-backdoor', 'VULNERABLE', 'ProFTPd Backdoor', 'Critical', 9.8, 'ftp_vuln'),
+        ('http-shellshock', 'VULNERABLE', 'Shellshock (CVE-2014-6271)', 'Critical', 9.8, 'http_vuln'),
+        ('rdp-vuln-ms12-020', 'VULNERABLE', 'MS12-020 RDP Remote Code Execution', 'Critical', 9.3, 'rdp_vuln'),
+        ('dns-zone-transfer', 'Transfer', 'DNS Zone Transfer Allowed', 'High', 7.5, 'dns_vuln'),
+        ('smtp-open-relay', 'relay', 'SMTP Open Relay', 'High', 7.5, 'smtp_vuln'),
+        ('realvnc-auth-bypass', 'VULNERABLE', 'RealVNC Authentication Bypass', 'Critical', 9.8, 'vnc_vuln'),
+        ('mysql-empty-password', 'account has empty password', 'MySQL Empty Password', 'Critical', 9.8, 'database'),
+        ('smb-vuln-conficker', 'VULNERABLE', 'Conficker Worm (MS08-067)', 'Critical', 9.8, 'smb_vuln'),
+    ]
+
+    for r in results:
+        ip = r['ip']
+        port = r['port']
+        scripts_output = r.get('scripts', '') or ''
+        if not scripts_output:
+            continue
+
+        for script_id, match_str, finding_name, severity, cvss, category in SCRIPT_FINDINGS:
+            if script_id in scripts_output and match_str.lower() in scripts_output.lower():
+                if finding_name not in grouped:
+                    grouped[finding_name] = {
+                        'finding_name': finding_name,
+                        'severity': severity,
+                        'cvss': cvss,
+                        'category': category,
+                        'ips': set(),
+                        'ports': set(),
+                        'details': [],
+                    }
+                grouped[finding_name]['ips'].add(ip)
+                grouped[finding_name]['ports'].add(port)
+                detail = f'{finding_name} on {ip}:{port}'
+                if detail not in grouped[finding_name]['details']:
+                    grouped[finding_name]['details'].append(detail)
+
+        if 'ssl-enum-ciphers' in scripts_output:
+            if 'TLSv1.0' in scripts_output or 'SSLv3' in scripts_output:
+                fname = 'Weak TLS/SSL Version Supported'
+                if fname not in grouped:
+                    grouped[fname] = {
+                        'finding_name': fname,
+                        'severity': 'Medium',
+                        'cvss': 5.3,
+                        'category': 'ssl_vuln',
+                        'ips': set(),
+                        'ports': set(),
+                        'details': [],
+                    }
+                grouped[fname]['ips'].add(ip)
+                grouped[fname]['ports'].add(port)
+                weak = []
+                if 'SSLv3' in scripts_output:
+                    weak.append('SSLv3')
+                if 'TLSv1.0' in scripts_output:
+                    weak.append('TLSv1.0')
+                detail = f'Weak protocols ({", ".join(weak)}) on {ip}:{port}'
+                if detail not in grouped[fname]['details']:
+                    grouped[fname]['details'].append(detail)
 
     count = 0
     c = models.get_db()
