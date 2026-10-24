@@ -2,13 +2,17 @@
 {% block title %}Compare Scans — NetScan{% endblock %}
 {% block content %}
 <div class="page-header">
-    <h1>Compare Scans</h1>
+    <div>
+        <h1 style="font-size:1.4rem;">Compare Scans</h1>
+        <p style="color:var(--text-dim); font-size:0.85rem;">Select two scans to see what changed</p>
+    </div>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-sm">&larr; Dashboard</a>
 </div>
 
 <form method="GET" action="{{ url_for('compare') }}">
-    <div class="form-row" style="max-width:700px; margin-bottom:1.25rem;">
-        <div class="form-group">
-            <label for="scan1">Scan A</label>
+    <div style="display:flex; gap:1rem; align-items:end; flex-wrap:wrap; margin-bottom:1.25rem;">
+        <div style="flex:1; min-width:200px;">
+            <label for="scan1" style="display:block; font-size:0.8rem; color:var(--text-dim); margin-bottom:4px;">Scan A (Before)</label>
             <select id="scan1" name="scan1" class="form-control">
                 <option value="">Select scan...</option>
                 {% for s in scans %}
@@ -16,8 +20,9 @@
                 {% endfor %}
             </select>
         </div>
-        <div class="form-group">
-            <label for="scan2">Scan B</label>
+        <div style="font-size:1.2rem; color:var(--text-dim); padding-bottom:6px;">&rarr;</div>
+        <div style="flex:1; min-width:200px;">
+            <label for="scan2" style="display:block; font-size:0.8rem; color:var(--text-dim); margin-bottom:4px;">Scan B (After)</label>
             <select id="scan2" name="scan2" class="form-control">
                 <option value="">Select scan...</option>
                 {% for s in scans %}
@@ -25,101 +30,233 @@
                 {% endfor %}
             </select>
         </div>
+        <button type="submit" class="btn btn-primary" style="padding-bottom:8px;">Compare</button>
     </div>
-    <button type="submit" class="btn btn-primary mb-2">Compare</button>
 </form>
 
-{% if scan1 and scan2 %}
-<div class="compare-grid">
-    <div class="card">
-        <div class="card-header">{{ scan1.name }}</div>
-        <div class="text-dim text-sm mb-1">{{ scan1.targets }} &middot; {{ scan1.created_at }}</div>
-        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
-            <span class="badge badge-complete">{{ results1|length }} services</span>
-        </div>
-        <h4 class="text-sm mb-1" style="color:var(--text-dim);">OPEN SERVICES</h4>
-        <div class="table-wrap mb-2">
-            <table>
-                <thead><tr><th>IP</th><th>Port</th><th>Service</th></tr></thead>
-                <tbody>
-                    {% for r in results1 %}
-                    <tr>
-                        <td class="mono">{{ r.ip }}</td>
-                        <td class="mono">{{ r.port }}</td>
-                        <td>{{ r.service }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        <h4 class="text-sm mb-1" style="color:var(--text-dim);">FINDINGS</h4>
-        <div class="table-wrap">
-            <table>
-                <thead><tr><th>Sev</th><th>Finding</th><th>Port</th></tr></thead>
-                <tbody>
-                    {% for f in findings1 %}
-                    <tr>
-                        <td>
-                            {% if f.severity == 'Critical' %}<span class="badge badge-critical">C</span>
-                            {% elif f.severity == 'High' %}<span class="badge badge-high">H</span>
-                            {% elif f.severity == 'Medium' %}<span class="badge badge-medium">M</span>
-                            {% elif f.severity == 'Low' %}<span class="badge badge-low">L</span>
-                            {% else %}<span class="badge badge-info">I</span>{% endif %}
-                        </td>
-                        <td>{{ f.finding_name }}</td>
-                        <td class="mono">{{ f.port }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+{% if diff %}
+<!-- Summary Stats -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">New Services</div>
+        <div class="stat-value" style="color:#4caf50;">+{{ diff.new_services|length }}</div>
     </div>
+    <div class="stat-card">
+        <div class="stat-label">Removed Services</div>
+        <div class="stat-value" style="color:#ff4444;">-{{ diff.removed_services|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Changed Banners</div>
+        <div class="stat-value" style="color:var(--orange, #ff8800);">{{ diff.changed_banners|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">New Findings</div>
+        <div class="stat-value" style="color:#ff4444;">+{{ diff.new_findings|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Resolved</div>
+        <div class="stat-value" style="color:#4caf50;">{{ diff.resolved_findings|length }}</div>
+    </div>
+</div>
 
-    <div class="card">
-        <div class="card-header">{{ scan2.name }}</div>
-        <div class="text-dim text-sm mb-1">{{ scan2.targets }} &middot; {{ scan2.created_at }}</div>
-        <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
-            <span class="badge badge-complete">{{ results2|length }} services</span>
+<!-- Overview Bar -->
+<div class="card" style="margin-top:1rem;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <div>
+            <strong>{{ scan1.name }}</strong>
+            <span class="text-dim" style="font-size:0.8rem;">{{ scan1.targets }} &middot; {{ scan1.created_at }}</span>
+            <span class="badge badge-complete" style="margin-left:6px;">{{ diff.total_a }} services</span>
+            <span class="badge" style="background:var(--orange, #ff8800); color:#000; margin-left:4px;">{{ diff.findings_a }} findings</span>
         </div>
-        <h4 class="text-sm mb-1" style="color:var(--text-dim);">OPEN SERVICES</h4>
-        <div class="table-wrap mb-2">
-            <table>
-                <thead><tr><th>IP</th><th>Port</th><th>Service</th></tr></thead>
-                <tbody>
-                    {% for r in results2 %}
-                    <tr>
-                        <td class="mono">{{ r.ip }}</td>
-                        <td class="mono">{{ r.port }}</td>
-                        <td>{{ r.service }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        <h4 class="text-sm mb-1" style="color:var(--text-dim);">FINDINGS</h4>
-        <div class="table-wrap">
-            <table>
-                <thead><tr><th>Sev</th><th>Finding</th><th>Port</th></tr></thead>
-                <tbody>
-                    {% for f in findings2 %}
-                    <tr>
-                        <td>
-                            {% if f.severity == 'Critical' %}<span class="badge badge-critical">C</span>
-                            {% elif f.severity == 'High' %}<span class="badge badge-high">H</span>
-                            {% elif f.severity == 'Medium' %}<span class="badge badge-medium">M</span>
-                            {% elif f.severity == 'Low' %}<span class="badge badge-low">L</span>
-                            {% else %}<span class="badge badge-info">I</span>{% endif %}
-                        </td>
-                        <td>{{ f.finding_name }}</td>
-                        <td class="mono">{{ f.port }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <div style="font-size:1.2rem; color:var(--text-dim);">&rarr;</div>
+        <div>
+            <strong>{{ scan2.name }}</strong>
+            <span class="text-dim" style="font-size:0.8rem;">{{ scan2.targets }} &middot; {{ scan2.created_at }}</span>
+            <span class="badge badge-complete" style="margin-left:6px;">{{ diff.total_b }} services</span>
+            <span class="badge" style="background:var(--orange, #ff8800); color:#000; margin-left:4px;">{{ diff.findings_b }} findings</span>
         </div>
     </div>
 </div>
-{% elif not scan1 and not scan2 %}
-<div class="empty-state"><p>Select two scans above to compare their results.</p></div>
+
+<!-- New Services -->
+{% if diff.new_services %}
+<div class="card" style="margin-top:1rem;">
+    <div class="card-header" style="margin-bottom:0.75rem;">
+        <span style="color:#4caf50;">+</span> New Services in {{ scan2.name }}
+        <span class="badge" style="background:#4caf50; color:#000; margin-left:6px;">{{ diff.new_services|length }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>IP</th><th>Port</th><th>Protocol</th><th>Service</th><th>Banner</th></tr></thead>
+            <tbody>
+                {% for r in diff.new_services %}
+                <tr>
+                    <td class="mono"><a href="{{ url_for('ip_profile', ip_address=r.ip) }}" style="color:var(--accent-light);">{{ r.ip }}</a></td>
+                    <td><span class="badge" style="background:#4caf50; color:#000; padding:2px 8px; border-radius:4px;">{{ r.port }}</span></td>
+                    <td class="text-dim">{{ r.protocol }}</td>
+                    <td><strong>{{ r.service or '—' }}</strong></td>
+                    <td class="mono text-dim" style="font-size:0.8rem;">{{ r.banner or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 {% endif %}
+
+<!-- Removed Services -->
+{% if diff.removed_services %}
+<div class="card" style="margin-top:1rem;">
+    <div class="card-header" style="margin-bottom:0.75rem;">
+        <span style="color:#ff4444;">-</span> Removed Services (were in {{ scan1.name }})
+        <span class="badge" style="background:#ff4444; color:#fff; margin-left:6px;">{{ diff.removed_services|length }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>IP</th><th>Port</th><th>Protocol</th><th>Service</th><th>Banner</th></tr></thead>
+            <tbody>
+                {% for r in diff.removed_services %}
+                <tr style="opacity:0.7;">
+                    <td class="mono"><a href="{{ url_for('ip_profile', ip_address=r.ip) }}" style="color:var(--accent-light);">{{ r.ip }}</a></td>
+                    <td><span class="badge" style="background:#ff4444; color:#fff; padding:2px 8px; border-radius:4px;">{{ r.port }}</span></td>
+                    <td class="text-dim">{{ r.protocol }}</td>
+                    <td><strong>{{ r.service or '—' }}</strong></td>
+                    <td class="mono text-dim" style="font-size:0.8rem;">{{ r.banner or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Changed Banners / Versions -->
+{% if diff.changed_banners %}
+<div class="card" style="margin-top:1rem;">
+    <div class="card-header" style="margin-bottom:0.75rem;">
+        <span style="color:var(--orange, #ff8800);">~</span> Changed Services / Banners
+        <span class="badge" style="background:var(--orange, #ff8800); color:#000; margin-left:6px;">{{ diff.changed_banners|length }}</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>IP</th><th>Port</th><th>Before</th><th>After</th></tr></thead>
+            <tbody>
+                {% for c in diff.changed_banners %}
+                <tr>
+                    <td class="mono"><a href="{{ url_for('ip_profile', ip_address=c.ip) }}" style="color:var(--accent-light);">{{ c.ip }}</a></td>
+                    <td><span class="badge" style="background:var(--orange, #ff8800); color:#000; padding:2px 8px; border-radius:4px;">{{ c.port }}</span></td>
+                    <td>
+                        <div style="font-size:0.85rem;">{{ c.old_service or '—' }}</div>
+                        <div class="mono text-dim" style="font-size:0.75rem; text-decoration:line-through;">{{ c.old_banner or '—' }}</div>
+                    </td>
+                    <td>
+                        <div style="font-size:0.85rem;">{{ c.new_service or '—' }}</div>
+                        <div class="mono" style="font-size:0.75rem; color:#4caf50;">{{ c.new_banner or '—' }}</div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- New Findings -->
+{% if diff.new_findings %}
+<div class="card" style="margin-top:1rem;">
+    <div class="card-header" style="margin-bottom:0.75rem;">
+        <span style="color:#ff4444;">!</span> New Findings in {{ scan2.name }}
+        <span class="badge" style="background:#ff4444; color:#fff; margin-left:6px;">{{ diff.new_findings|length }}</span>
+    </div>
+    {% for f in diff.new_findings %}
+    <div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--bg-dim, #1a1d27);">
+        {% if f.severity == 'Critical' %}
+        <span style="background:#ff4444; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">CRIT</span>
+        {% elif f.severity == 'High' %}
+        <span style="background:#ff8800; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">HIGH</span>
+        {% elif f.severity == 'Medium' %}
+        <span style="background:#2196f3; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">MED</span>
+        {% elif f.severity == 'Low' %}
+        <span style="background:#555; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">LOW</span>
+        {% else %}
+        <span style="background:#333; color:#aaa; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">INFO</span>
+        {% endif %}
+        <div style="flex:1;">
+            <div style="font-size:0.85rem;">{{ f.finding_name }}</div>
+            {% if f.detail %}
+            <div style="font-size:0.75rem; color:var(--text-dim); margin-top:2px;">{{ f.detail|truncate(120) }}</div>
+            {% endif %}
+        </div>
+        <code style="font-size:0.75rem; color:var(--text-dim);">{{ f.ip }} :{{ f.port }}</code>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Resolved Findings -->
+{% if diff.resolved_findings %}
+<div class="card" style="margin-top:1rem;">
+    <div class="card-header" style="margin-bottom:0.75rem;">
+        <span style="color:#4caf50;">&#10003;</span> Resolved Findings (were in {{ scan1.name }})
+        <span class="badge" style="background:#4caf50; color:#000; margin-left:6px;">{{ diff.resolved_findings|length }}</span>
+    </div>
+    {% for f in diff.resolved_findings %}
+    <div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--bg-dim, #1a1d27); opacity:0.7;">
+        {% if f.severity == 'Critical' %}
+        <span style="background:#ff4444; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">CRIT</span>
+        {% elif f.severity == 'High' %}
+        <span style="background:#ff8800; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">HIGH</span>
+        {% elif f.severity == 'Medium' %}
+        <span style="background:#2196f3; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">MED</span>
+        {% elif f.severity == 'Low' %}
+        <span style="background:#555; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">LOW</span>
+        {% else %}
+        <span style="background:#333; color:#aaa; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">INFO</span>
+        {% endif %}
+        <div style="flex:1;">
+            <div style="font-size:0.85rem; text-decoration:line-through;">{{ f.finding_name }}</div>
+        </div>
+        <code style="font-size:0.75rem; color:var(--text-dim);">{{ f.ip }} :{{ f.port }}</code>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- No Changes -->
+{% if not diff.new_services and not diff.removed_services and not diff.changed_banners and not diff.new_findings and not diff.resolved_findings %}
+<div class="card" style="margin-top:1rem;">
+    <div class="empty-state">
+        <p style="color:#4caf50; font-size:1.1rem;">No differences found between these scans.</p>
+        <p class="text-dim" style="font-size:0.85rem;">Both scans have identical services and findings.</p>
+    </div>
+</div>
+{% endif %}
+
+{% elif not scan1 and not scan2 %}
+<div class="card" style="margin-top:1rem;">
+    <div class="empty-state">
+        <p>Select two scans above to compare their results.</p>
+    </div>
+</div>
+{% elif scan1 and not scan2 %}
+<div class="card" style="margin-top:1rem;">
+    <div class="empty-state">
+        <p>Select a second scan (Scan B) to compare against.</p>
+    </div>
+</div>
+{% elif not scan1 and scan2 %}
+<div class="card" style="margin-top:1rem;">
+    <div class="empty-state">
+        <p>Select the first scan (Scan A) to compare against.</p>
+    </div>
+</div>
+{% endif %}
+
+<style>
+@media (max-width: 900px) {
+    div[style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+    }
+}
+</style>
 {% endblock %}

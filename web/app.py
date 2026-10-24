@@ -1170,6 +1170,7 @@ def compare():
     scan1 = scan2 = None
     results1 = results2 = []
     findings1 = findings2 = []
+    diff = None
 
     if scan1_id:
         scan1 = models.get_scan(scan1_id)
@@ -1180,10 +1181,52 @@ def compare():
         results2 = models.get_scan_results(scan2_id)
         findings2 = models.get_finding_results(scan2_id)
 
+    if scan1 and scan2:
+        svc_a = {(r['ip'], r['port']): r for r in results1}
+        svc_b = {(r['ip'], r['port']): r for r in results2}
+        keys_a, keys_b = set(svc_a.keys()), set(svc_b.keys())
+
+        new_services = [svc_b[k] for k in sorted(keys_b - keys_a)]
+        removed_services = [svc_a[k] for k in sorted(keys_a - keys_b)]
+
+        changed_banners = []
+        for k in sorted(keys_a & keys_b):
+            a, b = svc_a[k], svc_b[k]
+            old_banner = (a['banner'] or '')
+            new_banner = (b['banner'] or '')
+            old_svc = (a['service'] or '')
+            new_svc = (b['service'] or '')
+            if old_banner != new_banner or old_svc != new_svc:
+                changed_banners.append({
+                    'ip': k[0], 'port': k[1],
+                    'old_service': old_svc, 'new_service': new_svc,
+                    'old_banner': old_banner, 'new_banner': new_banner,
+                })
+
+        find_a = {(f['finding_name'], f['port']) for f in findings1}
+        find_b = {(f['finding_name'], f['port']) for f in findings2}
+        find_b_map = {(f['finding_name'], f['port']): f for f in findings2}
+        find_a_map = {(f['finding_name'], f['port']): f for f in findings1}
+        new_findings = [find_b_map[k] for k in sorted(find_b - find_a)]
+        resolved_findings = [find_a_map[k] for k in sorted(find_a - find_b)]
+
+        diff = {
+            'new_services': new_services,
+            'removed_services': removed_services,
+            'changed_banners': changed_banners,
+            'new_findings': new_findings,
+            'resolved_findings': resolved_findings,
+            'total_a': len(results1),
+            'total_b': len(results2),
+            'findings_a': len(findings1),
+            'findings_b': len(findings2),
+        }
+
     return render_template('compare.html', scans=scans,
                            scan1=scan1, scan2=scan2,
                            results1=results1, results2=results2,
-                           findings1=findings1, findings2=findings2)
+                           findings1=findings1, findings2=findings2,
+                           diff=diff)
 
 
 # --- Settings ---
