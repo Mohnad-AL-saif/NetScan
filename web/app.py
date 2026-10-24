@@ -1005,7 +1005,10 @@ def run_findings(scan_id):
     for r in results:
         ip = r['ip']
         port = r['port']
-        scripts_output = r.get('scripts', '') or ''
+        try:
+            scripts_output = r['scripts'] or ''
+        except (IndexError, KeyError):
+            scripts_output = ''
         if not scripts_output:
             continue
 
@@ -1054,7 +1057,10 @@ def run_findings(scan_id):
     for r in results:
         ip = r['ip']
         port = r['port']
-        scripts_text = r.get('scripts', '') or ''
+        try:
+            scripts_text = r['scripts'] or ''
+        except (IndexError, KeyError):
+            scripts_text = ''
         if not scripts_text or port != 22:
             continue
 
