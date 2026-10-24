@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}{{ ip }} — NetScan{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1 style="font-size:1.4rem;">IP Profile: <code style="color:var(--accent-light);">{{ ip }}</code></h1>
+        <p style="color:var(--text-dim); font-size:0.85rem;">
+            {{ results|length }} open port{{ 's' if results|length != 1 }} &middot;
+            {{ findings|length }} finding{{ 's' if findings|length != 1 }} &middot;
+            {{ history|length }} scan{{ 's' if history|length != 1 }}
+        </p>
+    </div>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary btn-sm">&larr; Dashboard</a>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Open Ports</div>
+        <div class="stat-value">{{ results|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Findings</div>
+        <div class="stat-value" style="color:var(--orange);">{{ findings|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Critical</div>
+        <div class="stat-value text-red">{{ findings|selectattr('severity', 'equalto', 'Critical')|list|length }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Scans</div>
+        <div class="stat-value">{{ history|length }}</div>
+    </div>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem;">
+    <div class="card">
+        <div class="card-header" style="margin-bottom:0.75rem;">Open Services</div>
+        {% if results %}
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Port</th>
+                        <th>Protocol</th>
+                        <th>Service</th>
+                        <th>Banner</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in results %}
+                    <tr>
+                        <td><span class="badge" style="background:var(--accent-light); color:#000; padding:2px 8px; border-radius:4px;">{{ r.port }}</span></td>
+                        <td class="text-dim">{{ r.protocol }}</td>
+                        <td><strong>{{ r.service or '—' }}</strong></td>
+                        <td class="mono text-dim" style="font-size:0.8rem;">{{ r.banner or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-dim">No services found.</p>
+        {% endif %}
+    </div>
+
+    <div class="card">
+        <div class="card-header" style="margin-bottom:0.75rem;">Findings</div>
+        {% if findings %}
+        {% for f in findings %}
+        <div style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--bg-dim, #1a1d27);">
+            {% if f.severity == 'Critical' %}
+            <span style="background:#ff4444; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">CRIT</span>
+            {% elif f.severity == 'High' %}
+            <span style="background:#ff8800; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">HIGH</span>
+            {% elif f.severity == 'Medium' %}
+            <span style="background:#2196f3; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">MED</span>
+            {% elif f.severity == 'Low' %}
+            <span style="background:#555; color:#fff; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">LOW</span>
+            {% else %}
+            <span style="background:#333; color:#aaa; padding:2px 6px; border-radius:4px; font-size:0.7rem; min-width:50px; text-align:center;">INFO</span>
+            {% endif %}
+            <div style="flex:1;">
+                <div style="font-size:0.85rem;">{{ f.finding_name }}</div>
+                {% if f.detail %}
+                <div style="font-size:0.75rem; color:var(--text-dim); margin-top:2px;">{{ f.detail|truncate(100) }}</div>
+                {% endif %}
+            </div>
+            <code style="font-size:0.75rem; color:var(--text-dim);">:{{ f.port }}</code>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="text-dim">No findings for this IP.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div class="card" style="margin-top:1rem;">
+    <div class="card-header">Scan History</div>
+    {% if history %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Scan</th>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Ports Found</th>
+                    <th>Date</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for h in history %}
+                <tr>
+                    <td>#{{ h.id }}</td>
+                    <td>{{ h.name }}</td>
+                    <td>
+                        {% if h.status == 'completed' %}
+                        <span class="badge badge-complete">Complete</span>
+                        {% elif h.status == 'stopped' %}
+                        <span class="badge badge-stopped">Stopped</span>
+                        {% elif h.status == 'running' %}
+                        <span class="badge badge-running">Running</span>
+                        {% else %}
+                        <span class="badge badge-failed">{{ h.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ h.port_count }}</td>
+                    <td class="text-dim text-sm">{{ h.created_at }}</td>
+                    <td><a href="{{ url_for('scan_detail', scan_id=h.id) }}" class="btn btn-sm btn-secondary">View</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-dim">No scan history.</p>
+    {% endif %}
+</div>
+
+<style>
+@media (max-width: 900px) {
+    div[style*="grid-template-columns:1fr 1fr"] {
+        grid-template-columns: 1fr !important;
+    }
+}
+</style>
+{% endblock %}

@@ -1098,6 +1098,47 @@ def upload_bulk_output(scan_id):
     return redirect(url_for('scan_detail', scan_id=scan_id))
 
 
+# --- IP Profile ---
+
+@app.route('/ip/<ip_address>')
+@login_required
+def ip_profile(ip_address):
+    conn = models.get_db()
+    results = conn.execute('''
+        SELECT sr.*, s.id as scan_id, s.name as scan_name, s.created_at as scan_date
+        FROM scan_results sr JOIN scans s ON sr.scan_id = s.id
+        WHERE sr.ip = ? AND s.user_id = ?
+        ORDER BY s.id DESC, sr.port
+    ''', (ip_address, session['user_id'])).fetchall()
+
+    findings = conn.execute('''
+        SELECT fr.* FROM finding_results fr
+        JOIN scans s ON fr.scan_id = s.id
+        WHERE fr.ip LIKE ? AND s.user_id = ? AND fr.vulnerable = 1
+        ORDER BY CASE fr.severity WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 WHEN 'Low' THEN 3 ELSE 4 END
+    ''', (f'%{ip_address}%', session['user_id'])).fetchall()
+
+    scan_history = conn.execute('''
+        SELECT DISTINCT s.id, s.name, s.created_at, s.status,
+               COUNT(sr.id) as port_count
+        FROM scans s JOIN scan_results sr ON s.id = sr.scan_id
+        WHERE sr.ip = ? AND s.user_id = ?
+        GROUP BY s.id ORDER BY s.id DESC
+    ''', (ip_address, session['user_id'])).fetchall()
+
+    seen_ports = set()
+    latest_results = []
+    for r in results:
+        if r['port'] not in seen_ports:
+            seen_ports.add(r['port'])
+            latest_results.append(r)
+
+    conn.close()
+    return render_template('ip_profile.html', ip=ip_address,
+                           results=latest_results, findings=findings,
+                           history=scan_history)
+
+
 # --- Compare ---
 
 @app.route('/compare')

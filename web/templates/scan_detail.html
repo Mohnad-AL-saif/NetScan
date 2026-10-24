@@ -501,7 +501,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <tbody>
                 {% for r in results %}
                 <tr>
-                    <td class="mono">{{ r.ip }}</td>
+                    <td class="mono"><a href="{{ url_for('ip_profile', ip_address=r.ip) }}" style="color:var(--accent-light);">{{ r.ip }}</a></td>
                     <td class="mono">{{ r.port }}</td>
                     <td>{% if r.protocol == 'udp' %}<span class="badge badge-udp">udp</span>{% else %}{{ r.protocol }}{% endif %}</td>
                     <td>{{ r.service }}</td>
