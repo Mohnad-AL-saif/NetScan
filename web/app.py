@@ -281,6 +281,20 @@ def new_scan():
     return render_template('new_scan.html')
 
 
+def group_ports_across_ips(port_list):
+    """Group discovered ports by port number across all IPs.
+    Returns: [(port, proto, [{'ip': ip, 'service': svc}, ...]), ...]
+    sorted by number of IPs sharing the port (most shared first).
+    """
+    groups = {}
+    for p in port_list:
+        key = (p['port'], p.get('protocol', 'tcp'))
+        if key not in groups:
+            groups[key] = []
+        groups[key].append({'ip': p['ip'], 'service': p.get('service', '')})
+    return sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
+
+
 def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
     """Multi-phase scan with live updates, stop support, and dedup."""
     lock = threading.Lock()
@@ -321,9 +335,14 @@ def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
         # === PHASE 2: TCP Version Detection ===
         live_scans[scan_id]['status'] = 'phase2'
         live_scans[scan_id]['phase'] = 2
-        live_scans[scan_id]['phase_label'] = 'TCP Version Detection'
 
-        port_numbers = [p['port'] for p in tcp_ports]
+        tcp_port_groups = group_ports_across_ips(tcp_ports)
+        group_summary = ', '.join(
+            f':{port}({len(ips)}IPs)' for (port, _proto), ips in tcp_port_groups[:5]
+        )
+        live_scans[scan_id]['phase_label'] = f'TCP Version Detection — {group_summary}'
+
+        port_numbers = list(set(p['port'] for p in tcp_ports))
         phase2_results, cmd2, phase2_xml = nmap_runner.run_phase2(targets, port_numbers, controller=controller)
         if cmd2:
             with lock:
@@ -425,9 +444,14 @@ def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
 
             live_scans[scan_id]['status'] = 'phase4'
             live_scans[scan_id]['phase'] = 4
-            live_scans[scan_id]['phase_label'] = 'UDP Version Detection'
 
-            udp_port_numbers = [p['port'] for p in udp_ports_data]
+            udp_port_groups = group_ports_across_ips(udp_ports_data)
+            udp_group_summary = ', '.join(
+                f':{port}({len(ips)}IPs)' for (port, _proto), ips in udp_port_groups[:5]
+            )
+            live_scans[scan_id]['phase_label'] = f'UDP Version Detection — {udp_group_summary}'
+
+            udp_port_numbers = list(set(p['port'] for p in udp_ports_data))
             udp_phase2_results, cmd4, udp_xml = nmap_runner.run_udp_phase2(targets, udp_port_numbers, controller=controller)
             if cmd4:
                 with lock:
