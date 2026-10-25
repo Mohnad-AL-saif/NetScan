@@ -8,16 +8,32 @@ import json
 
 
 def make_non_interactive(cmd):
-    if any(tool in cmd for tool in ['ssh ', 'scp ', 'sftp ', 'ssh-audit']):
+    if not cmd or not cmd.strip():
+        return cmd
+
+    tool = cmd.split()[0] if cmd.split() else ''
+
+    # ssh-audit: remove SSH-style options it doesn't support
+    if 'ssh-audit' in tool:
+        cmd = re.sub(r'\s*-o\s+\w+=\S+', '', cmd)
+    elif any(t in cmd for t in ['ssh ', 'scp ', 'sftp ']):
         if '-o StrictHostKeyChecking' not in cmd:
             parts = cmd.split(' ', 1)
             cmd = f'{parts[0]} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {parts[1]}'
+        if '@' in cmd and '-o BatchMode' not in cmd:
+            cmd = cmd.replace(tool + ' ', f'{tool} -o BatchMode=yes -o ConnectTimeout=5 ', 1)
 
     if 'nmap' in cmd and 'ssh' in cmd and '--script-args' not in cmd:
         cmd += ' --script-args ssh.timeout=5'
 
     if 'curl ' in cmd and '--max-time' not in cmd:
         cmd = cmd.replace('curl ', 'curl --max-time 10 -s -k ', 1)
+
+    if 'mysql ' in cmd and '--connect-timeout' not in cmd:
+        cmd = cmd.replace('mysql ', 'mysql --connect-timeout=5 ', 1)
+
+    if 'psql ' in cmd and '-W' in cmd:
+        cmd = cmd.replace('-W', '-w')
 
     if 'openssl s_client' in cmd:
         if 'echo' not in cmd:
