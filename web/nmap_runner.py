@@ -497,3 +497,180 @@ def parse_nmap_xml(xml_string, default_ip='', default_protocol='tcp'):
             })
 
     return results
+
+
+# ═══ Phase 5: Deep Enumeration — script-based ═══
+
+ENUM_SCRIPTS = {
+    'ssh': 'scripts/ssh.py',
+    'ftp': 'scripts/ftp.py',
+    'http': 'scripts/http.py',
+    'https': 'scripts/http.py',
+    'smb': 'scripts/smb.py',
+    'mysql': 'scripts/mysql.py',
+    'mssql': 'scripts/mssql.py',
+    'redis': 'scripts/redis.py',
+    'rdp': 'scripts/rdp.py',
+    'snmp': 'scripts/snmp.py',
+    'ldap': 'scripts/ldap.py',
+    'smtp': 'scripts/smtp.py',
+    'vnc': 'scripts/vnc.py',
+    'nfs': 'scripts/nfs.py',
+    'winrm': 'scripts/winrm.py',
+    'pop3': 'scripts/pop3.py',
+    'imap': 'scripts/imap.py',
+    'squid': 'scripts/squid.py',
+    'mongodb': 'scripts/mongodb.py',
+    'generic': 'scripts/generic.py',
+}
+
+ENUM_PORT_TO_SERVICE = {
+    21: 'ftp', 22: 'ssh', 25: 'smtp',
+    80: 'http', 110: 'pop3', 111: 'nfs', 139: 'smb', 143: 'imap',
+    389: 'ldap', 443: 'https', 445: 'smb', 465: 'smtp', 587: 'smtp',
+    636: 'ldap', 993: 'imap', 995: 'pop3',
+    1433: 'mssql', 2049: 'nfs', 3128: 'squid', 3306: 'mysql',
+    3389: 'rdp',
+    5900: 'vnc', 5901: 'vnc', 5902: 'vnc', 5903: 'vnc',
+    5985: 'winrm', 5986: 'winrm', 6379: 'redis',
+    8080: 'http', 8443: 'https', 8000: 'http', 8888: 'http',
+    27017: 'mongodb', 27018: 'mongodb', 27019: 'mongodb',
+    161: 'snmp',
+}
+
+
+def run_deep_enumeration(ip, port, proto, service_name, scan_id, update_progress=None):
+    """Run the enumeration script for a discovered service.
+    Returns list of parsed findings dicts and combined raw output.
+    """
+    script_key = None
+    if service_name:
+        svc_lower = service_name.lower()
+        for key in ENUM_SCRIPTS:
+            if key in svc_lower:
+                script_key = key
+                break
+    if not script_key:
+        script_key = ENUM_PORT_TO_SERVICE.get(port)
+    if not script_key or script_key not in ENUM_SCRIPTS:
+        script_key = 'generic'
+
+    script_path = ENUM_SCRIPTS.get(script_key, 'scripts/generic.py')
+    full_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), script_path)
+    if not os.path.exists(full_script_path):
+        return [], ''
+
+    outdir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        '..', 'scan_outputs', str(scan_id), f'{ip}_{port}_{proto}_{script_key}'
+    )
+    os.makedirs(outdir, exist_ok=True)
+
+    if update_progress:
+        update_progress(f"Deep enum: {script_key} on {ip}:{port}")
+
+    try:
+        result = subprocess.run(
+            ['python3', '-I', full_script_path, ip, str(port), proto, outdir],
+            capture_output=True, text=True, timeout=600,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        combined_output = (result.stdout or '') + '\n' + (result.stderr or '')
+        findings = parse_script_output(combined_output, outdir, script_key, ip, port, proto)
+
+        if update_progress:
+            update_progress(f"Deep enum done: {script_key} on {ip}:{port} — {len(findings)} findings")
+
+        return findings, combined_output.strip()
+
+    except subprocess.TimeoutExpired:
+        if update_progress:
+            update_progress(f"Deep enum timeout: {script_key} on {ip}:{port}")
+        return [], ''
+    except Exception as e:
+        if update_progress:
+            update_progress(f"Deep enum error: {script_key} on {ip}:{port}: {e}")
+        return [], ''
+
+
+def parse_script_output(output, outdir, script_key, ip, port, proto):
+    """Parse script output for findings by detecting markers and reading output files."""
+    findings = []
+    if not output:
+        return findings
+
+    for line in output.split('\n'):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        clean = re.sub(r'\033\[[0-9;]*m', '', stripped)
+
+        severity = None
+        classification = None
+        upper = clean.upper()
+
+        if any(kw in upper for kw in ['VULNERABLE', 'CRITICAL', '[!!!]', 'RCE', 'EXPLOIT']):
+            severity = 'Critical'
+            classification = 'vulnerable'
+        elif any(kw in upper for kw in ['WARNING', '[!]', 'WEAK', 'DEPRECATED', 'ANONYMOUS ACCESS', 'NO AUTH', 'DEFAULT CRED']):
+            severity = 'High'
+            classification = 'vulnerable'
+        elif any(kw in upper for kw in ['[+]', 'SUCCESS', 'FOUND', 'ENABLED', 'ACCESSIBLE']):
+            severity = 'Medium'
+            classification = 'info'
+        elif any(kw in upper for kw in ['[-]', 'DENIED', 'REFUSED', 'FAILED', 'CLOSED', 'FILTERED']):
+            severity = 'Low'
+            classification = 'safe'
+
+        if severity:
+            title = clean[:120]
+            for prefix in ['[*] ', '[+] ', '[-] ', '[!] ', '[!!!] ', '[\\u2713] ', '[\\u2717] ']:
+                if title.startswith(prefix):
+                    title = title[len(prefix):]
+                    break
+
+            findings.append({
+                'finding_id': f'DEEP-{script_key.upper()}-{len(findings)+1}',
+                'finding_name': f'[{script_key.upper()}] {title}',
+                'severity': severity,
+                'cvss': {'Critical': 9.8, 'High': 7.5, 'Medium': 5.3, 'Low': 3.7}.get(severity, 0),
+                'category': f'deep_enum_{script_key}',
+                'vulnerable': 1 if classification == 'vulnerable' else 0,
+                'detail': clean[:500],
+                'command': f'{script_key}.py enumeration',
+                'ip': ip,
+                'port': port,
+                'cve': '',
+                'status': classification or 'info',
+            })
+
+    results_plain = os.path.join(outdir, 'results', 'plain_text')
+    if os.path.isdir(results_plain):
+        for fname in sorted(os.listdir(results_plain)):
+            fpath = os.path.join(results_plain, fname)
+            try:
+                with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read(20000)
+                cmd_match = re.search(r'COMMAND:\n={50,}\n(.+?)\n', content)
+                command_used = cmd_match.group(1) if cmd_match else fname
+                output_match = re.search(r'OUTPUT:\n={50,}\n(.+)', content, re.DOTALL)
+                raw_output = output_match.group(1) if output_match else content
+
+                findings.append({
+                    'finding_id': f'DEEP-{script_key.upper()}-FILE-{len(findings)+1}',
+                    'finding_name': f'[{script_key.upper()}] {fname.replace(".txt", "").replace("_", " ").title()}',
+                    'severity': 'Info',
+                    'cvss': 0,
+                    'category': f'deep_enum_{script_key}',
+                    'vulnerable': 0,
+                    'detail': raw_output[:500],
+                    'command': command_used[:300],
+                    'ip': ip,
+                    'port': port,
+                    'cve': '',
+                    'status': 'info',
+                })
+            except Exception:
+                pass
+
+    return findings

@@ -504,6 +504,73 @@ def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args, scan_mod
             except Exception:
                 pass
 
+        # === PHASE 5: Deep Enumeration (script-based) ===
+        if not controller.should_stop():
+            live_scans[scan_id]['status'] = 'deep_enum'
+            live_scans[scan_id]['phase'] = 5
+            live_scans[scan_id]['phase_label'] = 'Deep Service Enumeration'
+
+            all_ports = live_scans[scan_id]['ports']
+            deep_count = 0
+            for p_data in all_ports:
+                if controller.should_stop():
+                    break
+                p_ip = p_data['ip']
+                p_port = p_data['port']
+                p_proto = p_data.get('protocol', 'tcp')
+                p_svc = p_data.get('service', '') or ''
+
+                live_scans[scan_id]['phase_label'] = f'Deep Enum: {p_svc or "unknown"} on {p_ip}:{p_port}'
+
+                try:
+                    deep_findings, raw_out = nmap_runner.run_deep_enumeration(
+                        p_ip, p_port, p_proto, p_svc, scan_id
+                    )
+                    if deep_findings:
+                        deep_db = models.get_db()
+                        for df in deep_findings:
+                            try:
+                                deep_db.execute(
+                                    '''INSERT INTO finding_results
+                                    (scan_id, ip, port, finding_id, finding_name, severity, cvss, cve, vulnerable, detail, command, category, status)
+                                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                                    (scan_id, df['ip'], df['port'], df['finding_id'],
+                                     df['finding_name'], df['severity'], df['cvss'],
+                                     df.get('cve', ''), df['vulnerable'],
+                                     (df.get('detail', '') or '')[:500],
+                                     df.get('command', ''), df['category'],
+                                     df.get('status', 'info'))
+                                )
+                                deep_count += 1
+                            except Exception:
+                                pass
+                        deep_db.commit()
+                        deep_db.close()
+
+                        with lock:
+                            for df in deep_findings:
+                                if df.get('vulnerable'):
+                                    live_scans[scan_id]['findings'].append(df)
+                                    live_scans[scan_id]['vuln_count'] += 1
+                                    sev = df['severity'].lower()
+                                    if sev in live_scans[scan_id]['stats']:
+                                        live_scans[scan_id]['stats'][sev] += 1
+                            live_scans[scan_id]['finding_count'] += len(deep_findings)
+
+                    if raw_out:
+                        try:
+                            _db = models.get_db()
+                            _db.execute('INSERT INTO scan_raw_output (scan_id, phase, output_type, output) VALUES (?,?,?,?)',
+                                        (scan_id, f'phase5_{p_svc}_{p_ip}_{p_port}', 'text', raw_out[:50000]))
+                            _db.commit()
+                            _db.close()
+                        except Exception:
+                            pass
+                except Exception as e:
+                    print(f"Deep enum error {p_ip}:{p_port}: {e}")
+
+            live_scans[scan_id]['phase_label'] = f'Deep Enum complete — {deep_count} findings'
+
         # Wait for findings
         live_scans[scan_id]['status'] = 'finishing'
         live_scans[scan_id]['phase_label'] = 'Finishing checks'
@@ -614,7 +681,7 @@ def stop_scan(scan_id):
 def scan_progress_api(scan_id):
     data = live_scans.get(scan_id)
     if data:
-        pct_map = {'phase1': 20, 'phase2': 45, 'scripts': 55, 'phase3': 65, 'phase4': 80, 'version_check': 85, 'finishing': 90, 'done': 100, 'stopped': 100, 'error': 100}
+        pct_map = {'phase1': 15, 'phase2': 35, 'scripts': 45, 'phase3': 55, 'phase4': 65, 'version_check': 70, 'deep_enum': 80, 'finishing': 95, 'done': 100, 'stopped': 100, 'error': 100}
         return jsonify({
             'phase': data['phase_label'],
             'percent': pct_map.get(data['status'], 0)
