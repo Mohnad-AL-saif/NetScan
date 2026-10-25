@@ -39,6 +39,30 @@
             <div class="form-help">UDP is slower — default scans top 100 ports. Use -sU -p- for full UDP scan.</div>
         </div>
 
+        <div style="margin-top:1.25rem; padding:15px; background:var(--bg-dim, #1a1d27); border-radius:8px; border:1px solid var(--border, #333);">
+            <div style="font-weight:600; margin-bottom:10px; font-size:0.95rem;">Scan Mode</div>
+            <div style="display:flex; flex-direction:column; gap:8px;">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="radio" name="scan_mode" value="serial" checked>
+                    <span>Serial — one at a time, stable</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="radio" name="scan_mode" value="parallel_light">
+                    <span>Parallel Light — 3 workers, balanced</span>
+                </label>
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                    <input type="radio" name="scan_mode" value="parallel_full">
+                    <span>Parallel Full — 5-10 workers, fast</span>
+                </label>
+            </div>
+            <div id="thread-count" style="display:none; margin-top:10px;">
+                <label style="font-size:0.85rem;">Max workers:
+                    <input type="number" name="max_threads" value="3" min="1" max="20"
+                           style="width:60px; padding:4px 6px; background:var(--surface, #1a1d27); color:var(--text, #e0e0e0); border:1px solid var(--border, #333); border-radius:4px;">
+                </label>
+            </div>
+        </div>
+
         <div style="display:flex; gap:0.75rem; margin-top:1.25rem;">
             <button type="submit" class="btn btn-primary">Start Scan</button>
             <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
@@ -51,6 +75,17 @@
 <script>
 document.getElementById('udp-toggle').addEventListener('change', function() {
     document.getElementById('udp-args-group').style.display = this.checked ? 'block' : 'none';
+});
+document.querySelectorAll('input[name="scan_mode"]').forEach(function(radio) {
+    radio.addEventListener('change', function() {
+        document.getElementById('thread-count').style.display =
+            this.value === 'serial' ? 'none' : 'block';
+        if (this.value === 'parallel_light') {
+            document.querySelector('input[name="max_threads"]').value = 3;
+        } else if (this.value === 'parallel_full') {
+            document.querySelector('input[name="max_threads"]').value = 8;
+        }
+    });
 });
 </script>
 {% endblock %}

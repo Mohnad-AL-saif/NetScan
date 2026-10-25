@@ -247,6 +247,12 @@ def new_scan():
         tcp_args = request.form.get('tcp_args', '-sS -p- --min-rate 5000 -T4 -n -Pn').strip()
         udp_scan = request.form.get('udp_scan') == 'on'
         udp_args = request.form.get('udp_args', '-sU --top-ports 100 --min-rate 3000 -T4 -n -Pn').strip()
+        scan_mode = request.form.get('scan_mode', 'serial')
+        max_threads = int(request.form.get('max_threads', 3))
+        if max_threads < 1:
+            max_threads = 1
+        elif max_threads > 20:
+            max_threads = 20
 
         if not name:
             name = f"Scan {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -266,12 +272,13 @@ def new_scan():
             'phase_label': 'TCP Port Discovery', 'cmds': [],
             'port_count': 0, 'finding_count': 0, 'vuln_count': 0,
             'stats': {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0},
-            'udp_enabled': udp_scan
+            'udp_enabled': udp_scan,
+            'scan_mode': scan_mode
         }
 
         thread = threading.Thread(
             target=run_scan_background,
-            args=(scan_id, targets, tcp_args, udp_scan, udp_args)
+            args=(scan_id, targets, tcp_args, udp_scan, udp_args, scan_mode, max_threads)
         )
         thread.daemon = True
         thread.start()
@@ -295,12 +302,13 @@ def group_ports_across_ips(port_list):
     return sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
 
 
-def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
+def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args, scan_mode='serial', max_threads=3):
     """Multi-phase scan with live updates, stop support, and dedup."""
     lock = threading.Lock()
     findings_db = findings_engine.load_findings()
     controller = ScanController(scan_id)
-    controller.executor = ThreadPoolExecutor(max_workers=5)
+    workers = 1 if scan_mode == 'serial' else max_threads
+    controller.executor = ThreadPoolExecutor(max_workers=max(workers, 5))
     scan_controllers[scan_id] = controller
     finding_futures = []
     checked_findings = set()
@@ -586,7 +594,8 @@ def scan_live(scan_id):
         'vuln_count': data['vuln_count'],
         'stats': data['stats'],
         'cmds': data['cmds'],
-        'udp_enabled': data.get('udp_enabled', False)
+        'udp_enabled': data.get('udp_enabled', False),
+        'scan_mode': data.get('scan_mode', 'serial')
     })
 
 
