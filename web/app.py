@@ -399,6 +399,14 @@ def run_scan_background(scan_id, targets, tcp_args, udp_scan, udp_args):
         if controller.should_stop():
             raise Exception('Scan stopped by user')
 
+        # Wait for all TCP findings to complete before starting UDP
+        for future in finding_futures:
+            try:
+                future.result(timeout=30)
+            except Exception:
+                pass
+        finding_futures.clear()
+
         # === PHASE 3 & 4: UDP (if enabled) ===
         if udp_scan and udp_args:
             live_scans[scan_id]['status'] = 'phase3'
